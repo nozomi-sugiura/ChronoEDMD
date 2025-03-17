@@ -18,6 +18,19 @@ kEDMD_Sig/
 ├── frames/                 # Output figures or animations
 └── README.md
 
+## Data Source
+
+The SST dataset used in this project (`sst.mon.mean.nc`) is publicly available from NOAA PSL.
+
+- **COBE-SST2 (JMA COBE2 SST dataset)**  
+  [NOAA PSL COBE-SST2 page](https://psl.noaa.gov/data/gridded/data.cobe2.html)
+
+### Downloading the dataset
+
+You can download the dataset directly using the following `wget` command:
+
+```bash
+wget https://downloads.psl.noaa.gov/Datasets/COBE2/sst.mon.mean.nc -O data/sst.mon.mean.nc
 
 ## How to Use
 
@@ -40,3 +53,4 @@ Output visualizations (figures or animations) will be saved in the `frames/` dir
 
 ## License
 MIT License
+
