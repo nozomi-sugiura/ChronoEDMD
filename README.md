@@ -58,3 +58,5 @@ MIT License
 
 If you have ideas, suggestions, or found any issues, feel free to contribute or leave a comment!  
 Looking forward to your feedback :)
+
+Note: A corresponding arXiv paper is under preparation and will be shared here soon.
