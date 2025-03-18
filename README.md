@@ -54,3 +54,7 @@ Output visualizations (figures or animations) will be saved in the `frames/` dir
 ## License
 MIT License
 
+## Let's Collaborate!
+
+If you have ideas, suggestions, or found any issues, feel free to contribute or leave a comment!  
+Looking forward to your feedback :)
