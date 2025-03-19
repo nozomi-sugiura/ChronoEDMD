@@ -1,6 +1,5 @@
 import sys, math
 import numpy as np
-import sig_inv as si
 import matplotlib.pyplot as plt
 import seaborn as sns
 from scipy.optimize import brentq
