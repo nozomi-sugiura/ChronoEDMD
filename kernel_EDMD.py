@@ -724,7 +724,7 @@ if __name__ == "__main__":
     yticklabels = np.linspace(90, -90, 5, dtype=int)
 
     rms_error, errors_loo = loo_edmd_error(G, A, verbose=False)
-    print(f"#LOO RMS Error: {rms_err:.6f}")
+    print(f"#LOO RMS Error: {rms_error:.6f}")
     # kernel EDMD
     S2, U = np.linalg.eigh(G)
     S = np.diag(S2**0.5)
