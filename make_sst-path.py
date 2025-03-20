@@ -35,11 +35,14 @@ print("Compressed SST shape:", sst_compressed.shape)
 
 lag = 12
 dt = lag+1
-nxy = sst_compressed.shape[1]
+nxy = sst_compressed.shape[1]#+1
+smon = 11 #start month
 T2 = np.zeros((dt,nxy,nt//lag-1))
 for j in range(nt//lag-1):
     print(lag*j,lag*j+dt)
-    T2[:,:,j] = sst_compressed[lag*j:lag*j+dt,:]
+    T2[:,:,j] = sst_compressed[lag*j+(smon-1):lag*j+dt+(smon-1),:]
+#    #augment time axis
+#    T2[:,-1,j] = np.arange(lag*j+(smon-1),lag*j+dt+(smon-1))/12.
 np.save('sst_path',T2)
 
 
