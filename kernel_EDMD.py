@@ -236,7 +236,7 @@ def plot_eigenvalue_log_and_original(L, labels, dt, num_clusters=5, filename_log
     real_parts_original = np.real(L)
     imag_parts_original = np.imag(L)
     # 固定する描画範囲
-    x_min, x_max = -0.01, 0.01
+    x_min, x_max = -0.1, 0.1
     y_min, y_max = -1, 1
 
     plt.figure(figsize=(8, 6))
@@ -635,6 +635,62 @@ def residual2(K2,L,Tl):
         res[j] = np.sqrt((res1/res0).real - np.abs(L[j])**2)
 #        print("residual2",j,res[j],res0.real,res1.real)
     return res    
+def loo_edmd_error(G, A, verbose=False):
+    """
+    Leave-One-Out (LOO) による Kernel EDMD 誤差評価（RMS）関数
+    
+    Parameters
+    ----------
+    G : np.ndarray
+        Gram matrix（n_samples × n_samples）
+    A : np.ndarray
+        Cross Gram matrix（n_samples × n_samples）
+    verbose : bool
+        各サンプルの誤差を出力するかどうか
+    
+    Returns
+    -------
+    rms_error : float
+        Leave-One-Out誤差のRMS値
+    errors_loo : np.ndarray
+        各サンプルごとの誤差（オプション）
+    """
+    
+    n_samples = G.shape[0]
+    errors_loo = []
+    
+    for i in range(n_samples):
+        # Leave-One-Outサンプルインデックス
+        idx_train = np.delete(np.arange(n_samples), i)
+        
+        # LOO版 G と A を作成
+        G_train = G[np.ix_(idx_train, idx_train)]
+        A_train = A[np.ix_(idx_train, idx_train)]
+        
+        # EDMD 計算（K行列）
+        S2, U = np.linalg.eigh(G_train)
+        S = np.diag(S2**0.5)
+        Sinv = np.linalg.pinv(S)
+        K = Sinv @ U.T @ A_train @ U @ Sinv.T
+        
+        # LOOテストサンプルとの相関
+        G_test = G[i, idx_train]
+        A_test = A[i, idx_train]
+        
+        # 再構成誤差を計算
+        reconstruction = G_test @ U @ Sinv @ K.T.conj()
+        true_value = A_test @ U @ Sinv
+        
+        # ユークリッドノルムで誤差を記録
+        err = np.linalg.norm(reconstruction - true_value)
+        errors_loo.append(err)
+        
+        if verbose:
+            print(f"#LOO error of sample {i}: {err:.6f}")
+    # RMS誤差
+    errors_loo = np.array(errors_loo)
+    rms_error = np.sqrt(np.mean(errors_loo**2))
+    return rms_error, errors_loo        
 # メイン部分の修正
 if __name__ == "__main__":
     os.environ['OMP_NUM_THREADS'] = '1'
@@ -667,22 +723,21 @@ if __name__ == "__main__":
     xticklabels = np.linspace(0, 360, 7, dtype=int)
     yticklabels = np.linspace(90, -90, 5, dtype=int)
 
-
+    rms_error, errors_loo = loo_edmd_error(G, A, verbose=False)
+    print(f"#LOO RMS Error: {rms_err:.6f}")
     # kernel EDMD
     S2, U = np.linalg.eigh(G)
     S = np.diag(S2**0.5)
     Sinv = np.linalg.pinv(S)
     K = Sinv @ U.T @ A @ U @ Sinv.T
+    #Err = np.linalg.norm(A.T @ U @ Sinv - G @ U @ Sinv @ K.T.conj())
+    #print("#Err of K", Err)
     L, T, Tl = cp.linalg.eig(K,left=True)
     dt = 1.0    ###固有値の並べ替え
     n2 = 50
     L, T, Tl = sort_eigenvalues(L,T,Tl,dt,n2)
     K2 = Sinv @ U.T @ R @ U @ Sinv.T
     res = residual2(K2,L,Tl)
-    # 擬スペクトル計算（コンター表示用）
-    xx, yy, lambda_min_array = pseudospectra_contour(K, K2, grid_size=600)
-    # コンター表示とPDF保存
-    plot_pseudospectra_contour(xx, yy, lambda_min_array, filename="pseudospectra_contour.pdf")
     #
     Phi_x = U @ S @ T
     a = np.zeros(n)
@@ -696,7 +751,7 @@ if __name__ == "__main__":
 
     Phi_x_inv = np.linalg.pinv(Phi_x)
     gap = 2e-1
-    approved = np.where(res < 0.1, 1, 0)
+    approved = np.where(res < 0.2, 1, 0)
     inds = []
     for i in range(L.shape[0]):
         if approved[i] == 1:
@@ -728,6 +783,9 @@ if __name__ == "__main__":
       if kt==0:
       # 再構成されたフィールドをプロット（モードごとにループせず、一度だけ実行）
           r2 = plot_reconstructed_field(approved,Phi_x, Xi, valid_indices, nx, ny, years, selected_years, filename_prefix="frames/reconstructed_sst")
+          for i in range(L.shape[0]):
+              print(i, L[i].real,L[i].imag, (np.log(L[i])/dt).real, (np.log(L[i])/dt).imag,\
+                    2*np.pi/(np.log(L[i])/dt+1e-20).imag, r2[i], res[i] )
 #          print(r2)
 #        kt = 0
 #        for it in range(nt):
@@ -777,6 +835,7 @@ if __name__ == "__main__":
                  L=L, jt=jt, dt=dt)
 #    np.savez("intensity",Phi_x.T,inds)
 
-    for i in range(L.shape[0]):
-        print(i, L[i].real,L[i].imag, (np.log(L[i])/dt).real, (np.log(L[i])/dt).imag,\
-              2*np.pi/(np.log(L[i])/dt+1e-20).imag, r2[i], res[i] )
+    # 擬スペクトル計算（コンター表示用）
+    xx, yy, lambda_min_array = pseudospectra_contour(K, K2, grid_size=600)
+    # コンター表示とPDF保存
+    plot_pseudospectra_contour(xx, yy, lambda_min_array, filename="pseudospectra_contour.pdf")
