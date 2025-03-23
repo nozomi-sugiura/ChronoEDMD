@@ -1,5 +1,6 @@
 import sys, math
 import numpy as np
+#import sig_inv as si
 import matplotlib.pyplot as plt
 import seaborn as sns
 from scipy.optimize import brentq
@@ -7,6 +8,7 @@ from tqdm import tqdm
 import concurrent.futures
 from scipy.optimize import minimize
 from functools import partial
+from scipy.optimize import minimize_scalar
 
 np.set_printoptions(precision=2)
 
@@ -120,7 +122,7 @@ def func_lmda(lmda,X,m,base_kernel):
     return k1
 def func(lmda,X,m,p,base_kernel):
     return func_lmda(lmda,X,m,base_kernel)-p
-def target_function(m,x=1.0):
+def target_function(m,x=1):
     """ 指定した次数ごとの寄与関数 f(m) """
     return (x**m)*math.factorial(m)**(-2)
      # 例: 指数関数的減衰
@@ -128,77 +130,23 @@ def target_function(m,x=1.0):
 def compute_kernel_contributions(X, m, lmx, base_kernel):
     """ 各次数ごとのカーネル寄与を計算 """
     contributions = [1]#of the 0-th iterated integral
-    r_old = 0
+    r_old = 1
     for l in range(1, m + 1):
         r = signature_kernel_lm(X, X, l, lmx, lmx, base_kernel=base_kernel)  # l次のカーネル計算
         contributions.append(r - r_old)
         r_old = r
+        
     return np.array(contributions)
-
-def loss_function(lmda, X, m, target_func, base_kernel):
-    """ スケール係数を最適化するための損失関数 """
-    contributions = compute_kernel_contributions(X, m, lmda, base_kernel)
-    target_values = np.array([target_func(l) for l in range(0, m + 1)])
-    
-    # 損失関数: 目標関数 f(m) に対する最小二乗誤差
-    return np.sum((contributions - target_values) ** 2)
-
-def optimize_scaling_factor(X, m, target_func, base_kernel):
-    """ スケール調整係数 λ を最適化 """
-    initial_lmda = 1.0
-    res = minimize(loss_function, initial_lmda, args=(X, m, target_func, base_kernel), method='Nelder-Mead')
-    return res.x[0]  # 最適なスケール係数 λ を返す
-
-def scaling_and_normalization(X0, m, i_pad, target_function, base_kernel):
-    n, d, ntr = X0.shape
-    optimal_lambda = optimize_scaling_factor(padding(X0[:, :, -1], i_pad), m, target_function, base_kernel)
-    print(f"Optimal Scaling Factor λ: {optimal_lambda:.4e}")
-
-    kernel_contributions = compute_kernel_contributions(padding(X0[:, :, -1], i_pad), m, optimal_lambda, base_kernel)
-    target_values = np.array([target_function(l) for l in range(0, m + 1)])
-
-    print(kernel_contributions)
-    print(target_values)
-
-    plt.figure(figsize=(8, 5))
-    plt.plot(range(0, m + 1), kernel_contributions, label="Kernel Contributions", marker='o')
-    plt.plot(range(0, m + 1), target_values, label="Target Function", linestyle='--')
-    plt.xlabel("Kernel Order m")
-    plt.ylabel("Contribution")
-    plt.ylim(-0.01, None)
-    plt.title("Optimized Kernel Contributions vs. Target Function")
-    plt.legend()
-    plt.savefig("scale.png")
-    plt.close()
-
-    norm2 = np.zeros(ntr)
+def compute_all_kernel_contributions(X0, m, lmx, base_kernel):
+    """ 各次数ごとのカーネル寄与を計算 """
+    all_contributions = []
     for i in range(ntr):
-        norm2[i] = func_lmda(optimal_lambda, padding(X0[:, :, i], i_pad), m, base_kernel)
-
-    c = np.percentile(norm2, 90)
-    print("c", c)
-
-    plt.hist(norm2, bins=50)
-    plt.axvline(c, color='r', linestyle='--', label=f'C = {c:.2f} (90th Percentile)')
-    plt.xlabel("Squared Signature Norm")
-    plt.ylabel("Frequency")
-    plt.title("Distribution of Squared Signature Norms with 90th Percentile")
-    plt.legend()
-    plt.savefig("norm2.png")
-    plt.close()
-
-    lmda_opt = np.zeros(ntr)
-    for i in range(ntr):
-        k0 = func_lmda(optimal_lambda, padding(X0[:, :, i], i_pad), m, base_kernel)
-        p0 = func_psi(k0, a=1.0, C=c)
-        lmda_opt[i] = brentq(func, 0, 10000, args=(padding(X0[:, :, i], i_pad), m, p0, base_kernel), xtol=2e-15, maxiter=1000)
-        print("#lmda_opt", lmda_opt[i], i)
-
-    np.save("lmda", lmda_opt)
-    lmda_mean = np.mean(lmda_opt)
-    print("#lmda_mean", lmda_mean)
-
-    return optimal_lambda, lmda_opt, lmda_mean, c
+        X_pad = padding(X0[:, :, i], i_pad)
+        contributions = compute_kernel_contributions(X_pad, m, lmx, base_kernel)
+        all_contributions.append(contributions)
+    all_contributions = np.array(all_contributions)  # shape: (ntr, m+1)
+    mean_contributions = np.mean(all_contributions, axis=0)
+    return mean_contributions
 
 def calc_sig_data(X0):
     n, d, ntr = X0.shape
@@ -217,8 +165,7 @@ def save_gram_matrix(G, filename="gram_matrix.png", title="Gram Matrix Heatmap",
 
     Parameters:
     G : ndarray
-        Gram matrix (n x n).
-    filename : str
+        Gram matrix (n x n). : str
         Name of the output file (supports .png, .pdf, .svg, etc.).
     title : str
         Title of the heatmap.
@@ -245,9 +192,98 @@ def save_gram_matrix(G, filename="gram_matrix.png", title="Gram Matrix Heatmap",
     plt.close()
     
     print(f"Gram matrix heatmap saved as: {filename}")
+    
+def compute_mean_kernel_contributions(X0, m, base_kernel, i_pad):
+    ntr = X0.shape[2]
+    contributions_list = np.zeros((ntr, m + 1))
+    for i in tqdm(range(ntr)):
+        X_pad = padding(X0[:, :, i], i_pad)
+        # λ=1で呼び出す
+        contributions = compute_kernel_contributions(X_pad, m, lmx=1.0, base_kernel=base_kernel)
+#        print(i,contributions)
+        contributions_list[i, :] = contributions
 
+    # サンプル間で平均
+    mean_contributions = np.mean(contributions_list, axis=0)
+    return mean_contributions
+
+def scale_mean_contributions(mean_contributions, lam):
+    m_max = len(mean_contributions) - 1
+    scale_factors = np.array([lam ** (2 * m) for m in range(m_max + 1)])
+    return mean_contributions * scale_factors
+
+def loss_function(lam, mean_contributions, target_func, x1):
+    m_max = len(mean_contributions) - 1
+    target_values = np.array([target_func(m,x=x1) for m in range(0, m_max + 1)])
+    scaled_contributions = scale_mean_contributions(mean_contributions, lam)
+#    # 最小二乗誤差
+#    return np.sum((scaled_contributions - target_values) ** 2)
+# 小さい値を回避するためのイプシロン
+    epsilon = 1e-20
+    # 対数スケールで比較
+    log_scaled = np.log(scaled_contributions + epsilon)
+    log_target = np.log(target_values + epsilon)
+    # 最小二乗誤差（対数空間での差分）
+    return np.sum((log_scaled - log_target) ** 2)    
+def scaling_and_normalization(X0, m, i_pad, target_function, base_kernel):
+    ntr = X0.shape[2]
+    # 1. λ無しで平均寄与を計算
+    mean_contributions = compute_mean_kernel_contributions(X0, m, base_kernel_with_sigma, i_pad)
+    # 2. λ の最適化
+    x1 = 1#0.5
+    res = minimize_scalar(
+    lambda lam: loss_function(lam, mean_contributions, target_function, x1),
+        bounds=(0.01, 100),
+        method='bounded'
+    )
+    optimal_lambda = res.x
+    print(f"#Optimal lambda = {optimal_lambda}")
+    # 3. スケーリング後の寄与を確認
+    scaled_contributions = scale_mean_contributions(mean_contributions, optimal_lambda)
+    
+    # 4. プロット or ログ出力
+    target_values = np.array([target_function(l,x=x1) for l in range(0, m + 1)])
+    plt.figure(figsize=(8, 5))
+    plt.plot(range(0, m + 1), scaled_contributions, label="Scaled Kernel Contributions", marker='o')
+    plt.plot(range(0, m + 1), target_values, label="Target Function", linestyle='--')
+    plt.xlabel("Kernel Order m")
+    plt.ylabel("Contribution")
+    plt.title("Optimized Kernel Contributions vs. Target Function")
+    plt.legend()
+    plt.yscale('log')
+    plt.savefig("scale_lambda_optimized.png")
+    plt.close()
+    norm2 = np.zeros(ntr)
+    for i in range(ntr):
+        norm2[i] = func_lmda(optimal_lambda, padding(X0[:, :, i], i_pad), m, base_kernel)
+
+    c = np.percentile(norm2, 90)
+    print("#c", c)
+
+    plt.hist(norm2, bins=50)
+    plt.axvline(c, color='r', linestyle='--', label=f'C = {c:.2f} (90th Percentile)')
+    plt.xlabel("Squared Signature Norm")
+    plt.ylabel("Frequency")
+    plt.title("Distribution of Squared Signature Norms with 90th Percentile")
+    plt.legend()
+    plt.savefig("norm2.png")
+    plt.close()
+
+    lmda_opt = np.zeros(ntr)
+    for i in range(ntr):
+        k0 = func_lmda(optimal_lambda, padding(X0[:, :, i], i_pad), m, base_kernel)
+        p0 = func_psi(k0, a=1.0, C=c)
+        lmda_opt[i] = brentq(func, 0, 10000, args=(padding(X0[:, :, i], i_pad)\
+                              , m, p0, base_kernel), xtol=2e-15, maxiter=1000)
+    print("#lmda_opt", *lmda_opt)
+
+    np.save("lmda", lmda_opt)
+    lmda_mean = np.mean(lmda_opt)
+    print("#lmda_mean", lmda_mean)
+    
+    return optimal_lambda, lmda_opt, lmda_mean, c
 if __name__ == "__main__":
-    m = 10
+    m = 7
     i_pad = 1
 
     X0 = np.load('sst_path.npy')[:, :, :]
@@ -260,13 +296,8 @@ if __name__ == "__main__":
     kernel_type = "rbf"
     base_kernel_with_sigma = base_kernel_factory(kernel_type=kernel_type, sigma=sigma_data, c=0, d=1)
 
-    optimal_lambda, lmda_opt, lmda_mean, c = scaling_and_normalization(X0, m, i_pad, target_function, base_kernel_with_sigma)
-
-    isft = 1
-    X = X0[:, :, :-isft]
-    Y = X0[:, :, isft:]
-    lmx = lmda_opt[:-isft]
-    lmy = lmda_opt[isft:]
+    optimal_lambda, lmda_opt, lmda_mean, c\
+        = scaling_and_normalization(X0, m, i_pad, target_function, base_kernel_with_sigma)
 
     G, A, L = parallel_signature_kernel2(X0, m, i_pad, lmda_opt, base_kernel_with_sigma)
 
