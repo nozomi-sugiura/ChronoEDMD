@@ -1,17 +1,17 @@
-import sys
+# import sys  # <-- Unused import
 from tqdm import tqdm
 import numpy as np
 import scipy as cp
 import matplotlib.pyplot as plt
-import matplotlib.patheffects as pe
+# import matplotlib.patheffects as pe  # <-- Unused import
 #from sklearn.cluster import SpectralClustering
-import matplotlib.cm as cm
+# import matplotlib.cm as cm  # <-- Unused import
 import seaborn as sns
-from sklearn.preprocessing import StandardScaler
+#from sklearn.preprocessing import StandardScaler
 #import concurrent.futures
 from multiprocessing import Pool, cpu_count
 import os
-import matplotlib.ticker as ticker
+# import matplotlib.ticker as ticker  # <-- Unused import
 
 # ============================================
 # 並列計算用のグローバル変数初期化
@@ -548,37 +548,6 @@ def plot_real_imaginary(X, nx, ny, vmin, vmax, xticks, yticks, xticklabels, ytic
     plt.savefig(filename, dpi=300, bbox_inches='tight')
     plt.close()
 
-def plot_z_on_complex_plane(zs_array, filename="pseudospectra_plot.pdf"):
-    plt.figure(figsize=(6, 6))
-
-
-    # --- 単位円を描画 ---
-    theta = np.linspace(0, 2 * np.pi, 500)
-    unit_circle_x = np.cos(theta)
-    unit_circle_y = np.sin(theta)
-    plt.plot(unit_circle_x, unit_circle_y, 'k--', label='Unit Circle')
-
-    # --- 採用された z とその共役をプロット ---
-    plt.scatter(zs_array.real, zs_array.imag, color='red', marker='.', s=3, label='Accepted z')
-    plt.scatter(zs_array.real, -zs_array.imag, color='red', marker='.', s=3, label=None)
-
-    # --- 軸や装飾 ---
-    plt.axhline(0, color='gray', linestyle='--')
-    plt.axvline(0, color='gray', linestyle='--')
-
-    plt.xlabel('Re(z)')
-    plt.ylabel('Im(z)')
-    plt.title('Pseudospectra')
-    plt.legend()
-    plt.axis('equal')  # アスペクト比を1:1に
-    plt.grid(True)
-
-    # --- PDFファイルとして保存 ---
-    plt.savefig(filename, format='pdf')
-#    print(f"プロットをPDFとして保存しました: {filename}")
-
-#    # --- 画面にも表示 ---
-#    plt.show()
 def initializer(_K, _K_H, _L, _m, _eps2):
     global K, K_H, L, m, eps2
     K = _K
@@ -596,7 +565,7 @@ def compute_lambda_min(z):
         return (z, lambda_min, v_min)
     else:
         return None
-def pseudospectra(K_mat, L_mat, eps=1e-2):
+# def pseudospectra(K_mat, L_mat, eps=1e-2):  # <-- Unused function
     eps2_val = eps**2
     m_val = K_mat.shape[0]
     r_min, r_max, r_step = 1-0.2, 1.2, 0.004
@@ -617,7 +586,7 @@ def pseudospectra(K_mat, L_mat, eps=1e-2):
 
     return zs_array, lambda_min_array, v_min_array
 
-def residual1(K,K2,L,Tl):
+# def residual1(K,K2,L,Tl):  # <-- Unused function
     m = L.shape[0]
     res = np.zeros(m)
     for j in range(m):

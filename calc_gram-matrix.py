@@ -1,4 +1,4 @@
-import sys, math
+import math 
 import numpy as np
 #import sig_inv as si
 import matplotlib.pyplot as plt
@@ -6,7 +6,7 @@ import seaborn as sns
 from scipy.optimize import brentq
 from tqdm import tqdm
 import concurrent.futures
-from scipy.optimize import minimize
+# from scipy.optimize import minimize  # <-- Unused import
 from functools import partial
 from scipy.optimize import minimize_scalar
 
@@ -137,7 +137,7 @@ def compute_kernel_contributions(X, m, lmx, base_kernel):
         r_old = r
         
     return np.array(contributions)
-def compute_all_kernel_contributions(X0, m, lmx, base_kernel):
+# def compute_all_kernel_contributions(X0, m, lmx, base_kernel):  # <-- Unused function
     """ 各次数ごとのカーネル寄与を計算 """
     all_contributions = []
     for i in range(ntr):
@@ -311,4 +311,3 @@ if __name__ == "__main__":
     np.save("A_sst",A)    
     save_gram_matrix(L, filename="L_sst.png", title="L Matrix Heatmap",vmin=v0,vmax=v1)
     np.save("L_sst",L)    
-
