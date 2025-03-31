@@ -1,17 +1,17 @@
-# import sys  # <-- Unused import
+#import sys
 from tqdm import tqdm
 import numpy as np
 import scipy as cp
 import matplotlib.pyplot as plt
-# import matplotlib.patheffects as pe  # <-- Unused import
+#import matplotlib.patheffects as pe
 #from sklearn.cluster import SpectralClustering
-# import matplotlib.cm as cm  # <-- Unused import
+import matplotlib.cm as cm
 import seaborn as sns
 #from sklearn.preprocessing import StandardScaler
 #import concurrent.futures
 from multiprocessing import Pool, cpu_count
 import os
-# import matplotlib.ticker as ticker  # <-- Unused import
+#import matplotlib.ticker as ticker
 
 # ============================================
 # 並列計算用のグローバル変数初期化
@@ -565,37 +565,6 @@ def compute_lambda_min(z):
         return (z, lambda_min, v_min)
     else:
         return None
-# def pseudospectra(K_mat, L_mat, eps=1e-2):  # <-- Unused function
-    eps2_val = eps**2
-    m_val = K_mat.shape[0]
-    r_min, r_max, r_step = 1-0.2, 1.2, 0.004
-    r_values = np.arange(r_min, r_max + r_step, r_step)
-    theta_values = np.linspace(0, np.pi, 8*180)
-
-    zs = [r * np.exp(1j * theta) for r in r_values for theta in theta_values]
-
-    with Pool(processes=cpu_count(), initializer=initializer,
-              initargs=(K_mat, K_mat.T.conj(), L_mat, m_val, eps2_val)) as pool:
-        results = list(tqdm(pool.imap(compute_lambda_min, zs), total=len(zs)))
-
-    # Noneを除外
-    results = [r for r in results if r is not None]
-    zs_array = np.array([r[0] for r in results])
-    lambda_min_array = np.array([r[1] for r in results])
-    v_min_array = np.array([r[2] for r in results])
-
-    return zs_array, lambda_min_array, v_min_array
-
-# def residual1(K,K2,L,Tl):  # <-- Unused function
-    m = L.shape[0]
-    res = np.zeros(m)
-    for j in range(m):
-        A = K2 - L[j] * K.T.conj() - np.conj(L[j]) * K + np.abs(L[j])**2 * np.eye(m)
-        res0 = Tl[:,j].T.conj() @ Tl[:,j]
-        res1 = Tl[:,j].T.conj() @ A @ Tl[:,j]
-        res[j] = np.sqrt((res1/res0).real)
-#        print("residual1",j,res[j],res0.real,res1.real)
-    return res    
 def residual2(K2,L,Tl):
     res = np.zeros(L.shape[0])
     for j in range(L.shape[0]):
@@ -711,7 +680,7 @@ if __name__ == "__main__":
     Phi_x = U @ S @ T
     a = np.zeros(n)
     for i in range(n):
-        a[i] = np.vdot(Phi_x[:,i],Phi_x[:,i]).real
+        a[i] = np.vdot(Phi_x[:,i],Phi_x[:,i]).real/n
     a = a**0.5
     #normalize the eigenfunctions
     for i in range(n):
@@ -732,7 +701,6 @@ if __name__ == "__main__":
     n_modes = len(inds)
     vmax = np.zeros(nt)#,dtype=int)
     vmin = np.zeros(nt)#,dtype=int)
-    scale= np.zeros(nt)
 
     # 可視化したい年を指定
     selected_years = list(range(1980, 2020))
@@ -761,17 +729,16 @@ if __name__ == "__main__":
 #            intensity[jt,it] = np.sum(dsst[it,:]*Xi[jt,:])
       for jt in inds:
         if kt==0:
-              scale[jt] = np.sqrt(np.mean(np.abs(Xi)**2)) #時系列を正規化
-              abs_max_r = np.percentile(np.abs((Xi[jt,:]/scale[jt]).real), 99)  # 95% パーセンタイルで上限を設定
-              abs_max_i = np.percentile(np.abs((Xi[jt,:]/scale[jt]).imag), 99)  # 95% パーセンタイルで上限を設定
+              abs_max_r = np.percentile(np.abs(Xi[jt,:].real), 99)  # 95% パーセンタイルで上限を設定
+              abs_max_i = np.percentile(np.abs(Xi[jt,:].imag), 99)  # 95% パーセンタイルで上限を設定
               abs_max = max(abs_max_r,abs_max_i)
               vmax[jt] = max(abs_max, 1e-2)  # 最小スケールを 1e-2 に設定し、極端に小さい値を防ぐ
               vmin[jt] = -vmax[jt]  # vmin は vmax の反転
               # **固有関数の時系列プロット（周期を表示）**
-              plot_mode_timeseries(Phi_x*scale[jt], L, jt, dt, filename=f"frames/mode_timeseries_{jt:03d}.pdf")
+              plot_mode_timeseries(Phi_x, L, jt, dt, filename=f"frames/mode_timeseries_{jt:03d}.pdf")
           
         Xi_restored = np.full((nt, ny * nx), fill_value=1e20, dtype=np.complex64)
-        Xi_restored[:, valid_indices] = Xi/scale[jt]
+        Xi_restored[:, valid_indices] = Xi
         # 可視化用データ
         X = np.ma.masked_where(Xi_restored[jt, :] == 1e20, Xi_restored[jt, :])
 
