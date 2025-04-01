@@ -616,9 +616,8 @@ def loo_edmd_error(G, A, verbose=False):
         A_test = A[i, idx_train]
         
         # 再構成誤差を計算
-        reconstruction = G_test @ U @ Sinv @ K.T.conj()
-        true_value = A_test @ U @ Sinv
-        
+        reconstruction = G_test.T @ U @ Sinv @ K.T.conj()
+        true_value = A_test.T @ U @ Sinv
         # ユークリッドノルムで誤差を記録
         err = np.linalg.norm(reconstruction - true_value)
         errors_loo.append(err)
@@ -740,7 +739,7 @@ if __name__ == "__main__":
         Xi_restored = np.full((nt, ny * nx), fill_value=1e20, dtype=np.complex64)
         Xi_restored[:, valid_indices] = Xi
         # 可視化用データ
-        X = np.ma.masked_where(Xi_restored[jt, :] == 1e20, Xi_restored[jt, :])
+        X = np.ma.masked_where(Xi_restored[jt, :] == 1e20, Xi_restored[jt, :]) #jt-th Koopman spatial mode
 
         # **現在の kt に対応する月を取得**
         current_month = months[kt]
@@ -759,7 +758,7 @@ if __name__ == "__main__":
                     real_title=real_title,imag_title=imag_title,
                     filename=f"frames/sst_mode={jt:03d}-{kt:02d}.pdf",
                     L=L, jt=jt, dt=1.0)
-        if kt==0:
+        if kt==0: #X+X.conj()
             plot_real_phases(2*X, nx, ny,
                              vmin=2*vmin[jt], vmax=2*vmax[jt],
                  xticks=[0, 90, 180, 270, 360],
