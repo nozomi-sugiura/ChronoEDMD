@@ -178,8 +178,10 @@ def plot_real_phases(X, nx, ny, vmin, vmax,
         period_text = f" (e-folding: {efold:.1e} yr, Period: ∞ yr)"  # 周期が無限大（
 
     # 位相リスト（ラジアン）
-    phases = [0, np.pi / 6, np.pi / 3, np.pi / 2, 2 * np.pi / 3, 5 * np.pi / 6]
-    phase_labels = ['0', 'π/6', 'π/3', 'π/2', '2π/3', '5π/6']
+    phases = [0, np.pi / 3, 2*np.pi / 3, np.pi, 4 * np.pi / 3, 5 * np.pi / 3]
+    phase_labels = ['0', 'π/3', '2π/3', 'π', '4π/3', '5π/3']
+#    phases = [0, np.pi / 6, np.pi / 3, np.pi / 2, 2 * np.pi / 3, 5 * np.pi / 6]
+#    phase_labels = ['0', 'π/6', 'π/3', 'π/2', '2π/3', '5π/6']
 
     # 描画範囲をスケーリングに合わせる（経度0-360、緯度-90-90）
     extent = [0, 360, -90, 90]
@@ -236,8 +238,8 @@ def plot_eigenvalue_log_and_original(L, labels, dt, num_clusters=5, filename_log
     real_parts_original = np.real(L)
     imag_parts_original = np.imag(L)
     # 固定する描画範囲
-    x_min, x_max = -0.1, 0.1
-    y_min, y_max = -1, 1
+    x_min, x_max = -0.025, 0.025
+    y_min, y_max = -1.1, 1.1
 
     plt.figure(figsize=(8, 6))
     plt.xlim(x_min, x_max)
@@ -389,7 +391,7 @@ def plot_reconstructed_field(mask,Phi_x, Xi, valid_indices, nx, ny, years, selec
         plt.savefig(f"{filename_prefix}_{year}.pdf", dpi=300, bbox_inches='tight')
         plt.close()
     return r2
-def plot_mode_timeseries(Phi_x, L, jt, dt, filename="mode_timeseries.pdf"):
+def plot_mode_timeseries(Phi_x, L, jt, dt,smon, filename="mode_timeseries.pdf"):
     """
     指定された固有関数 Phi_x[:, jt] の実部と虚部の時系列をプロットし、周期をタイトルに表示し、
     1997年（エルニーニョ年）に縦線を引く。
@@ -402,8 +404,7 @@ def plot_mode_timeseries(Phi_x, L, jt, dt, filename="mode_timeseries.pdf"):
         filename (str): 画像を保存するファイル名
     """
     n = Phi_x.shape[0]
-    years = np.arange(n) + 1850  # x軸の年数（1850年スタート）
-
+    years = np.arange(n) + 1850+(smon-1)/12.  # x軸の年数（1850年スタート）
     # 実部と虚部の取得
     real_part = Phi_x[:, jt].real
     imag_part = Phi_x[:, jt].imag
@@ -427,7 +428,7 @@ def plot_mode_timeseries(Phi_x, L, jt, dt, filename="mode_timeseries.pdf"):
     plt.plot(years, imag_part, label="Imaginary Part", color='purple', linestyle='--')
 
     # **1997年（エルニーニョ年）に縦線を追加**
-    plt.axvline(x=1997, color='black', linestyle=':', linewidth=1.5, label="El Niño 1997")
+#    plt.axvline(x=1997, color='black', linestyle=':', linewidth=1.5, label="El Niño 1997")
 
     plt.xlabel("Year")
     plt.ylabel("Eigenfunction Value")
@@ -437,7 +438,40 @@ def plot_mode_timeseries(Phi_x, L, jt, dt, filename="mode_timeseries.pdf"):
 
     # **1850年を左端に固定**
     plt.xlim(1850, years[-1])
+# === フェーズ位置のマーカー追加 ===
+    if imag_log_L != 0:
+        base_year = years[0]
+        end_year = years[-1]
+        period = np.abs(2 * np.pi / imag_log_L)
 
+        # θ = 0 の時刻たち
+        phase_0_times = []
+        phase_pi_times = []
+
+        k = 0
+        while True:
+            t_0 = base_year + period * k
+            t_pi = base_year + period * (k + 0.5)
+            if t_0 > end_year and t_pi > end_year:
+                break
+            if t_0 <= end_year:
+                phase_0_times.append(t_0)
+            if t_pi <= end_year:
+                phase_pi_times.append(t_pi)
+            k += 1
+
+        # 描画
+        for t in phase_0_times:
+            plt.axvline(x=t, color='gray', linestyle='-', linewidth=0.8)
+            plt.text(t, plt.ylim()[1]*0.92, r"$\theta=0$", rotation=90,
+                     verticalalignment='top', horizontalalignment='center',
+                     fontsize=6, color='gray')
+
+        for t in phase_pi_times:
+            plt.axvline(x=t, color='gray', linestyle='--', linewidth=0.8)
+            plt.text(t, plt.ylim()[1]*0.92, r"$\theta=\pi$", rotation=90,
+                     verticalalignment='top', horizontalalignment='center',
+                     fontsize=6, color='gray')
     # 画像保存
     plt.savefig(filename, dpi=300, bbox_inches='tight')
     plt.close()
@@ -688,14 +722,14 @@ if __name__ == "__main__":
 
     Phi_x_inv = np.linalg.pinv(Phi_x)
     gap = 2e-1
-    approved = np.where(res < 0.2, 1, 0)
+    approved = np.where(res < gap, 1, 0)
     inds = []
     for i in range(L.shape[0]):
         if approved[i] == 1:
             inds.append(i)
     plot_eigenvalue_log_and_original(L, approved, dt,num_clusters=2)
     # データ処理
-    nt = sst_loaded.shape[0] // 12 - 2
+    nt = sst_loaded.shape[0] // 12 - 1
     dsst = np.zeros((nt, sst_loaded.shape[1]))
     n_modes = len(inds)
     vmax = np.zeros(nt)#,dtype=int)
@@ -704,12 +738,13 @@ if __name__ == "__main__":
     # 可視化したい年を指定
     selected_years = list(range(1980, 2020))
 #    selected_years = [1990, 1991, 1992, 1993, 1994, 1995, 1996, 1997, 1998, 1999]  # 例として5つの年を指定
-
+    smon = 6 #June
     for kt in range(13):
       if kt==0:
           for it in range(nt):
               dsst[it, :] = np.mean(sst_loaded[12*it:12*(it+1),:],axis=0)
 #              dsst[it, :] = sst_loaded[12*(it+1),:]-sst_loaded[12*it,:]#next_Jan - Jan
+          print(Phi_x_inv.shape,dsst.shape)
           Xi = Phi_x_inv @ dsst
       else:
           for it in range(nt):
@@ -734,7 +769,7 @@ if __name__ == "__main__":
               vmax[jt] = max(abs_max, 1e-2)  # 最小スケールを 1e-2 に設定し、極端に小さい値を防ぐ
               vmin[jt] = -vmax[jt]  # vmin は vmax の反転
               # **固有関数の時系列プロット（周期を表示）**
-              plot_mode_timeseries(Phi_x, L, jt, dt, filename=f"frames/mode_timeseries_{jt:03d}.pdf")
+              plot_mode_timeseries(Phi_x, L, jt, dt, smon,filename=f"frames/mode_timeseries_{jt:03d}.pdf")
           
         Xi_restored = np.full((nt, ny * nx), fill_value=1e20, dtype=np.complex64)
         Xi_restored[:, valid_indices] = Xi
@@ -742,7 +777,7 @@ if __name__ == "__main__":
         X = np.ma.masked_where(Xi_restored[jt, :] == 1e20, Xi_restored[jt, :]) #jt-th Koopman spatial mode
 
         # **現在の kt に対応する月を取得**
-        current_month = months[kt]
+        current_month = months[(kt+smon-1)%12]
 
         # **タイトルのフォーマット**
         title_format = "Real Part onto {:10}"  
