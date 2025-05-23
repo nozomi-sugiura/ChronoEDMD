@@ -1,4 +1,4 @@
-# kEDMD_Sig
+ChronoEDMD
 
 This repository contains Python code for Koopman operator analysis using Extended Dynamic Mode Decomposition (EDMD) combined with signature methods.  
 The method is applied to sea surface temperature (SST) data to extract decadal-scale modes, including dynamics related to the Atlantic Meridional Overturning Circulation (AMOC).
@@ -10,7 +10,7 @@ The method is applied to sea surface temperature (SST) data to extract decadal-s
 - Visualization tools for real and imaginary parts of the modes
 
 ## Directory Structure
-kEDMD_Sig/
+ChronoEDMD/
 ├── kernel_EDMD.py          # Kernel EDMD implementation
 ├── calc_gram-matrix.py     # Gram matrix calculation
 ├── make_sst-path.py        # Preprocessing of SST time series
