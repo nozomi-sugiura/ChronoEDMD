@@ -151,36 +151,26 @@ def compute_flat_area_weights(valid_indices, ny=89, nx=180, normalize=False):
 def plot_map_pdf(field2d, fname, title="", vmin=None, vmax=None, cmap="viridis", dpi=300,
                  cbar_label="", bad_color="#654321",
                  lon0=0.0, lon1=360.0, lat0=-90.0, lat1=90.0,
-                 fig_w=10.0,  # 横幅だけ指定（縦は自動）
+                 fig_w=10.0,
                  wspace=0.08, right=0.90):
-
-    import os
-    import numpy as np
-    import matplotlib.pyplot as plt
-    from matplotlib import gridspec
 
     A = np.asarray(field2d)
     ny, nx = A.shape
 
-    # lon/lat の実座標（imshow の extent）
     extent = (lon0, lon1, lat0, lat1)
 
-    # 図の縦横比：lon-span / lat-span に合わせる（= 2:1 が自然）
     lon_span = float(lon1 - lon0)
     lat_span = float(lat1 - lat0)
     fig_h = fig_w * (lat_span / lon_span)
 
-    # ticks（度で置く）
     xticks = np.linspace(lon0, lon1, 7)
     yticks = np.linspace(lat0, lat1, 5)
 
-    # cmap + NaN 色
     cmap_obj = plt.get_cmap(cmap)
     cmap_obj = cmap_obj.copy() if hasattr(cmap_obj, "copy") else cmap_obj
     if hasattr(cmap_obj, "set_bad"):
         cmap_obj.set_bad(color=bad_color)
 
-    # 範囲
     if vmin is None and vmax is None:
         vmax0 = float(np.nanmax(np.abs(A)))
         vmin, vmax = -vmax0, vmax0
@@ -196,7 +186,7 @@ def plot_map_pdf(field2d, fname, title="", vmin=None, vmax=None, cmap="viridis",
     cax = fig.add_subplot(spec[1])
 
     im = ax.imshow(A, origin="lower", cmap=cmap_obj, vmin=vmin, vmax=vmax,
-                   extent=extent, aspect="equal")  # ← ここが重要
+                   extent=extent, aspect="equal")
 
     ax.set_title(title)
     ax.set_xticks(xticks)
@@ -213,6 +203,8 @@ def plot_map_pdf(field2d, fname, title="", vmin=None, vmax=None, cmap="viridis",
     fig.savefig(fname, format="pdf", dpi=dpi, bbox_inches="tight")
     plt.close(fig)
     print(f"# [SAVED] {os.path.abspath(fname)}")
+
+
 # =========================
 # Koopman helpers
 # =========================
@@ -248,9 +240,7 @@ def residual2(K2, L, Tl):
         res[j] = np.sqrt(max(0.0, (res1.real / res0.real) - np.abs(L[j]) ** 2))
     return res
 
-def build_train_indices(tau: int, M: int, s: int,
-                        cv_mode: str = "lfo",
-                        gap: int = 0):
+def build_train_indices(tau: int, M: int, s: int, cv_mode: str = "lfo", gap: int = 0):
     """
     Returns (idx_next, idx_state) for training using 1-step transitions i -> i+1.
 
@@ -398,13 +388,10 @@ def y_clim_concat12_from_clim(
     """
     Build y_clim in the same space as Xfeat=concat12 built from anomaly SST.
 
-    Let anomaly a_t = x_t - c_t  (sst_compressed.npy is anomaly, clim_compressed.npy is c_t)
-    Climatology forecast in anomaly coordinates for future month t is:
+    anomaly a_t = x_t - c_t  (sst_compressed.npy is anomaly, clim_compressed.npy is c_t)
+    Climatology forecast in anomaly coordinates:
         a_hat_{t|tau} = c_{tau_m} - c_t,
     where tau_m is the latest index <= t_obs_last with the same month as t.
-
-    Returns:
-        y_clim: (12*d,) vector for the target year (tau+s), weighted by wt.
     """
     clim_compressed = np.asarray(clim_compressed, dtype=np.float64)
     wt = np.asarray(wt, dtype=np.float64)
@@ -461,13 +448,21 @@ def mse_rms_error(params, M0, X_all, s=5, eps=1e-12,
                   cv_mode="lfo",
                   gap=0,
                   clim_compressed=None, wt=None, start_offset=0,
-                  stride=12):
+                  stride=12,
+                  return_std=False):
     """
-    Returns:
+    If return_std=False:
       (mse_model, rms_model, mse_pers, rms_pers, mse_clim, rms_clim)
+
+    If return_std=True:
+      (mse_model, rms_model, std_rms_model,
+       mse_pers,  rms_pers,  std_rms_pers,
+       mse_clim,  rms_clim,  std_rms_clim)
+
+    NOTE: std is computed over per-tau RMS values, restricted to groups that satisfy min_coverage.
     """
     if clim_compressed is None:
-        raise ValueError("mse_rms_error: clim_compressed is None. Pass np.load('clim_compressed.npy').")
+        raise ValueError("mse_rms_error: clim_compressed is None.")
     if wt is None:
         raise ValueError("mse_rms_error: wt is None.")
 
@@ -488,6 +483,10 @@ def mse_rms_error(params, M0, X_all, s=5, eps=1e-12,
         raise ValueError("concat12 expects D divisible by 12.")
     d_space = D // 12
 
+    rms_list_model = []
+    rms_list_pers  = []
+    rms_list_clim  = []
+
     sum_mse_model = 0.0
     sum_mse_pers  = 0.0
     sum_mse_clim  = 0.0
@@ -498,6 +497,10 @@ def mse_rms_error(params, M0, X_all, s=5, eps=1e-12,
         per_tau_pers  = []
         per_tau_clim  = []
         used_tau = 0
+
+        tmp_rms_model = []
+        tmp_rms_pers  = []
+        tmp_rms_clim  = []
 
         for tau in range(int(tau_start), M - s):
             idx_next, idx_state = build_train_indices(
@@ -558,9 +561,20 @@ def mse_rms_error(params, M0, X_all, s=5, eps=1e-12,
             err_pers  = y_pers - y_true
             err_clim  = y_clim - y_true
 
-            per_tau_model.append(monthwise_mean_sqnorm(err_model, nmon=12))
-            per_tau_pers.append(monthwise_mean_sqnorm(err_pers,  nmon=12))
-            per_tau_clim.append(monthwise_mean_sqnorm(err_clim,  nmon=12))
+            a_m = monthwise_mean_sqnorm(err_model, nmon=12)  # (1/12)Σ||e||^2
+            a_p = monthwise_mean_sqnorm(err_pers,  nmon=12)
+            a_c = monthwise_mean_sqnorm(err_clim,  nmon=12)
+
+            per_tau_model.append(a_m)
+            per_tau_pers.append(a_p)
+            per_tau_clim.append(a_c)
+
+            # per-tau RMS in physical unit:
+            # RMS_tau = sqrt( (1/d) * (1/12) Σ ||e||^2 )
+            tmp_rms_model.append(float(np.sqrt(a_m / d_space)))
+            tmp_rms_pers.append (float(np.sqrt(a_p / d_space)))
+            tmp_rms_clim.append (float(np.sqrt(a_c / d_space)))
+
             used_tau += 1
 
         coverage = (used_tau / tau_total) if tau_total > 0 else 0.0
@@ -569,6 +583,11 @@ def mse_rms_error(params, M0, X_all, s=5, eps=1e-12,
                 print(f"# [RMS INVALID] NUM_REJ={NUM_REJ} coverage={coverage:.3f} (used={used_tau}/{tau_total})")
             continue
 
+        # Only add to std lists if this group is valid under min_coverage
+        rms_list_model.extend(tmp_rms_model)
+        rms_list_pers.extend(tmp_rms_pers)
+        rms_list_clim.extend(tmp_rms_clim)
+
         if per_tau_model:
             sum_mse_model += float(np.mean(per_tau_model)) / d_space
             sum_mse_pers  += float(np.mean(per_tau_pers))  / d_space
@@ -576,15 +595,30 @@ def mse_rms_error(params, M0, X_all, s=5, eps=1e-12,
             n_groups_used += 1
 
     if n_groups_used == 0:
-        return (np.inf, np.inf, np.inf, np.inf, np.inf, np.inf)
+        if not return_std:
+            return (np.inf, np.inf, np.inf, np.inf, np.inf, np.inf)
+        return (np.inf, np.inf, np.inf,
+                np.inf, np.inf, np.inf,
+                np.inf, np.inf, np.inf)
 
     mse_model = sum_mse_model / n_groups_used
     mse_pers  = sum_mse_pers  / n_groups_used
     mse_clim  = sum_mse_clim  / n_groups_used
 
-    return (mse_model, float(np.sqrt(mse_model)),
-            mse_pers,  float(np.sqrt(mse_pers)),
-            mse_clim,  float(np.sqrt(mse_clim)))
+    rms_model = float(np.sqrt(mse_model))
+    rms_pers  = float(np.sqrt(mse_pers))
+    rms_clim  = float(np.sqrt(mse_clim))
+
+    if not return_std:
+        return (mse_model, rms_model, mse_pers, rms_pers, mse_clim, rms_clim)
+
+    std_rms_model = float(np.std(rms_list_model, ddof=1)) if len(rms_list_model) >= 2 else 0.0
+    std_rms_pers  = float(np.std(rms_list_pers,  ddof=1)) if len(rms_list_pers)  >= 2 else 0.0
+    std_rms_clim  = float(np.std(rms_list_clim,  ddof=1)) if len(rms_list_clim)  >= 2 else 0.0
+
+    return (mse_model, rms_model, std_rms_model,
+            mse_pers,  rms_pers,  std_rms_pers,
+            mse_clim,  rms_clim,  std_rms_clim)
 
 
 # =========================
@@ -754,7 +788,6 @@ def mean_kpc_score(params, M0, X_all, s=5, eps=1e-12,
     LMDA, num_rej = params
     NUM_REJ = int(round(num_rej))
 
-    # H = Σ_i M0[i] * LMDA^(2i)
     H = M0[0].copy()
     for i in range(1, len(M0)):
         H += M0[i] * (LMDA ** (2 * i))
@@ -872,8 +905,7 @@ def mean_kpc_score(params, M0, X_all, s=5, eps=1e-12,
 
 
 # =========================
-# mean kPC for BEST params: model-kPC and clim-kPC together
-#   - called only once after optimization, so it does not slow search
+# mean kPC for BEST params: model-kPC and clim-kPC together (with std)
 # =========================
 def mean_kpc_score_pair_model_clim(params, M0, X_all, s=5, eps=1e-12,
                                   xfeat_mode="concat12",
@@ -903,8 +935,8 @@ def mean_kpc_score_pair_model_clim(params, M0, X_all, s=5, eps=1e-12,
     M = H.shape[1]
     tau_total = max(0, (M - s) - int(tau_start))
 
-    kpc_sum_m = 0.0; kpc_cnt_m = 0
-    kpc_sum_c = 0.0; kpc_cnt_c = 0
+    kpc_list_m = []
+    kpc_list_c = []
     used_tau = 0
     last_info = None
 
@@ -1006,24 +1038,34 @@ def mean_kpc_score_pair_model_clim(params, M0, X_all, s=5, eps=1e-12,
             used_tau += 1
 
             if np.isfinite(kpc_m):
-                kpc_sum_m += float(kpc_m); kpc_cnt_m += 1
+                kpc_list_m.append(float(kpc_m))
                 last_info = info_m
             if np.isfinite(kpc_c):
-                kpc_sum_c += float(kpc_c); kpc_cnt_c += 1
+                kpc_list_c.append(float(kpc_c))
 
     coverage = (used_tau / tau_total) if tau_total > 0 else 0.0
-    if (coverage < float(min_coverage)) or (kpc_cnt_m == 0):
+    if (coverage < float(min_coverage)) or (len(kpc_list_m) == 0):
+        mean_m = -np.inf
+        std_m  = 0.0
+        mean_c = np.nan
+        std_c  = 0.0
         if return_diag:
-            return (-np.inf, np.nan, float(coverage), int(kpc_cnt_m), int(kpc_cnt_c), last_info, diag)
-        return (-np.inf, np.nan, float(coverage), int(kpc_cnt_m), int(kpc_cnt_c), last_info)
+            return (mean_m, std_m, mean_c, std_c, float(coverage),
+                    int(len(kpc_list_m)), int(len(kpc_list_c)), last_info, diag)
+        return (mean_m, std_m, mean_c, std_c, float(coverage),
+                int(len(kpc_list_m)), int(len(kpc_list_c)), last_info)
 
-    mean_m = kpc_sum_m / kpc_cnt_m
-    mean_c = (kpc_sum_c / kpc_cnt_c) if kpc_cnt_c > 0 else np.nan
+    mean_m = float(np.mean(kpc_list_m))
+    std_m  = float(np.std(kpc_list_m, ddof=1)) if len(kpc_list_m) >= 2 else 0.0
+
+    mean_c = float(np.mean(kpc_list_c)) if len(kpc_list_c) > 0 else np.nan
+    std_c  = float(np.std(kpc_list_c, ddof=1)) if len(kpc_list_c) >= 2 else 0.0
+
     if return_diag:
-        return (float(mean_m), float(mean_c), float(coverage),
-                int(kpc_cnt_m), int(kpc_cnt_c), last_info, diag)
-    return (float(mean_m), float(mean_c), float(coverage),
-            int(kpc_cnt_m), int(kpc_cnt_c), last_info)
+        return (mean_m, std_m, mean_c, std_c, float(coverage),
+                int(len(kpc_list_m)), int(len(kpc_list_c)), last_info, diag)
+    return (mean_m, std_m, mean_c, std_c, float(coverage),
+            int(len(kpc_list_m)), int(len(kpc_list_c)), last_info)
 
 
 # =========================
@@ -1059,7 +1101,6 @@ def scan_LMDA_for_SIG_max_kpc_1d_bounded(
         lo, hi = float(lm_min), float(lm_max)
 
     u_lo, u_hi = np.log(lo), np.log(hi)
-
     eval_cnt = {"n": 0}
 
     def eval_mkpc(LMDA):
@@ -1163,7 +1204,7 @@ def main():
     ap.add_argument("--lmda_min", type=float, default=0.05)
     ap.add_argument("--lmda_max", type=float, default=20.0)
 
-    ap.add_argument("--lmda_refine_ratio", type=float, default=1.25)  # used as ratio_init in 1D bounded
+    ap.add_argument("--lmda_refine_ratio", type=float, default=1.25)
     ap.add_argument("--lmda_1d_maxiter", type=int, default=20)
 
     ap.add_argument("--min_coverage", type=float, default=0.8)
@@ -1178,7 +1219,6 @@ def main():
 
     # kPC settings
     ap.add_argument("--lmda_kpc", type=float, default=1.0)
-    ap.add_argument("--kpc_print", type=int, default=0)
 
     args = ap.parse_args()
 
@@ -1202,11 +1242,19 @@ def main():
     print(f"# CV: mode={cv_mode} gap={gap}")
 
     # ---- load ----
-    sst_compressed = np.load("sst_compressed.npy")  # anomaly, degC
-    clim_compressed = np.load("clim_compressed.npy")  # climatology, degC
+    sst_compressed = np.load("sst_compressed.npy")      # anomaly, degC
+    clim_compressed = np.load("clim_compressed.npy")    # climatology, degC
     valid_indices = np.load("valid_indices.npy")
     wt = compute_flat_area_weights(valid_indices, ny=89, nx=180, normalize=False)
-
+    
+    # ---- area-mean RMS correction factor (diagnostic only) ----
+    d = int(wt.size)
+    sum_w2 = float(np.sum(wt**2))          # = sum_i cos(lat_i) over valid points
+    c_area = float(np.sqrt(d / (sum_w2 + 1e-300)))
+#    print(f"# area-weight diag: d={d}")
+#    print(f"# area-weight diag: sum_w2=sum(wt^2)={sum_w2:.15e}")
+#    print(f"# area-RMS correction factor: c_area=sqrt(d/sum_w2)={c_area:.15e}")
+    
     # ---- build Xfeat ----
     Xfeat = build_Xfeat(sst_compressed, wt, mode=args.xfeat, stride=12, start_offset=args.start_offset)
 
@@ -1226,7 +1274,7 @@ def main():
             sst_compressed, wt, n=13, stride=12, start_offset=args.start_offset
         )
         sigma_spk = sigma_spk_numpy(X0w, I=12)
-        print("#sigma (SPK definition) =", sigma_spk)
+        print("# sigma (SPK definition) =", sigma_spk)
 
         month_w = spk_month_weights(args.spk_weight)
         H_spk = seasonal_progress_gram_from_windows(
@@ -1264,27 +1312,30 @@ def main():
             mkpc_spk, nr_spk, cov_spk, cnt_spk = best_spk
             print(f"# [SPK BEST] NUM_REJ={nr_spk} mean_kPC={mkpc_spk:.6f} (coverage={cov_spk:.3f}, kpc_cnt={cnt_spk})")
 
-            mkpc_m, mkpc_c, cov2, cnt_m, cnt_c, last_info, diag_best = mean_kpc_score_pair_model_clim(
-                params=[0.0, nr_spk],
-                M0=M0_spk, X_all=Xfeat, s=args.s,
-                xfeat_mode=args.xfeat,
-                base_kernel=base_kernel, ord_sig=args.ord,
-                lmda_kpc=float(args.lmda_kpc),
-                min_coverage=args.min_coverage,
-                tau_start=tau_start,
-                cv_mode=cv_mode,
-                gap=gap,
-                clim_compressed=clim_compressed, wt=wt,
-                start_offset=args.start_offset, stride=12,
-                return_diag=True,
-            )
+            (mkpc_m, std_m, mkpc_c, std_c, cov2, cnt_m, cnt_c, last_info, diag_best) = \
+                mean_kpc_score_pair_model_clim(
+                    params=[0.0, nr_spk],
+                    M0=M0_spk, X_all=Xfeat, s=args.s,
+                    xfeat_mode=args.xfeat,
+                    base_kernel=base_kernel, ord_sig=args.ord,
+                    lmda_kpc=float(args.lmda_kpc),
+                    min_coverage=args.min_coverage,
+                    tau_start=tau_start,
+                    cv_mode=cv_mode,
+                    gap=gap,
+                    clim_compressed=clim_compressed, wt=wt,
+                    start_offset=args.start_offset, stride=12,
+                    return_diag=True,
+                )
             print(f"# [SPK BEST DIAG] {summarize_mode_diag(diag_best)}")
             if last_info is not None:
                 print("# [SPK kPC] per-order weighted TP (last tau):", last_info["TP_wlevels"])
-            print(f"# [SPK kPC] mean_kPC_model={mkpc_m:.6f} (cnt={cnt_m})")
-            print(f"# [SPK kPC] mean_kPC_clim ={mkpc_c:.6f} (cnt={cnt_c})")
+            print(f"# [SPK kPC] mean_kPC_model={mkpc_m:.6f} std_kPC_model={std_m:.6f} (cnt={cnt_m})")
+            print(f"# [SPK kPC] mean_kPC_clim ={mkpc_c:.6f} std_kPC_clim ={std_c:.6f} (cnt={cnt_c})")
 
-            (mse_m, rms_m, mse_p, rms_p, mse_c, rms_c) = mse_rms_error(
+            (mse_m, rms_m, std_rms_m,
+             mse_p, rms_p, std_rms_p,
+             mse_c, rms_c, std_rms_c) = mse_rms_error(
                 params=[0.0, nr_spk], M0=M0_spk, X_all=Xfeat, s=args.s,
                 xfeat_mode=args.xfeat, min_coverage=args.min_coverage, verbose=True,
                 tau_start=tau_start, cv_mode=cv_mode, gap=gap,
@@ -1292,10 +1343,22 @@ def main():
                 wt=wt,
                 start_offset=args.start_offset,
                 stride=12,
+                return_std=True,
             )
-            print(f"# [SPK RMS] model: MSE={mse_m:.6e}, RMS={rms_m:.6e}")
-            print(f"# [SPK RMS] pers : MSE={mse_p:.6e}, RMS={rms_p:.6e}")
-            print(f"# [SPK RMS] clim : MSE={mse_c:.6e}, RMS={rms_c:.6e}")
+            # ---- overwrite to "area-normalized RMS" as the official RMS ----
+            mse_m *= c_area**2
+            mse_p *= c_area**2
+            mse_c *= c_area**2
+            rms_m *= c_area
+            rms_p *= c_area
+            rms_c *= c_area
+            std_rms_m *= c_area
+            std_rms_p *= c_area
+            std_rms_c *= c_area
+            
+            print(f"# [SPK RMS] model: MSE={mse_m:.6e}, RMS={rms_m:.6e}, RMS_std={std_rms_m:.6e}")
+            print(f"# [SPK RMS] pers : MSE={mse_p:.6e}, RMS={rms_p:.6e}, RMS_std={std_rms_p:.6e}")
+            print(f"# [SPK RMS] clim : MSE={mse_c:.6e}, RMS={rms_c:.6e}, RMS_std={std_rms_c:.6e}")
 
             (_, rms_x_maps) = loo_spatial_rms_maps(
                 params=[0.0, nr_spk], M0=M0_spk, X_all=Xfeat,
@@ -1390,27 +1453,30 @@ def main():
                 print(f"# [SIG BEST] NUM_REJ={num_rej_best} LMDA={LMDA_best:.10f} mean_kPC={mkpc_sig:.6f} "
                       f"(coverage={cov_best:.3f}, kpc_cnt={cnt_best})")
 
-        mkpc_m, mkpc_c, _cov, cnt_m, cnt_c, last_info, diag_sig = mean_kpc_score_pair_model_clim(
-            params=[LMDA_best, num_rej_best],
-            M0=M0_sig, X_all=Xfeat, s=args.s,
-            xfeat_mode=args.xfeat,
-            base_kernel=base_kernel, ord_sig=ORD,
-            lmda_kpc=float(args.lmda_kpc),
-            min_coverage=args.min_coverage,
-            tau_start=tau_start,
-            cv_mode=cv_mode,
-            gap=gap,
-            clim_compressed=clim_compressed, wt=wt,
-            start_offset=args.start_offset, stride=12,
-            return_diag=True,
-        )
+        (mkpc_m, std_m, mkpc_c, std_c, _cov, cnt_m, cnt_c, last_info, diag_sig) = \
+            mean_kpc_score_pair_model_clim(
+                params=[LMDA_best, num_rej_best],
+                M0=M0_sig, X_all=Xfeat, s=args.s,
+                xfeat_mode=args.xfeat,
+                base_kernel=base_kernel, ord_sig=ORD,
+                lmda_kpc=float(args.lmda_kpc),
+                min_coverage=args.min_coverage,
+                tau_start=tau_start,
+                cv_mode=cv_mode,
+                gap=gap,
+                clim_compressed=clim_compressed, wt=wt,
+                start_offset=args.start_offset, stride=12,
+                return_diag=True,
+            )
         print(f"# [SIG BEST DIAG] {summarize_mode_diag(diag_sig)}")
         if last_info is not None:
             print("# [SIG kPC] per-order weighted TP (last tau):", last_info["TP_wlevels"])
-        print(f"# [SIG kPC] mean_kPC_model={mkpc_m:.6f} (cnt={cnt_m})")
-        print(f"# [SIG kPC] mean_kPC_clim ={mkpc_c:.6f} (cnt={cnt_c})")
+        print(f"# [SIG kPC] mean_kPC_model={mkpc_m:.6f} std_kPC_model={std_m:.6f} (cnt={cnt_m})")
+        print(f"# [SIG kPC] mean_kPC_clim ={mkpc_c:.6f} std_kPC_clim ={std_c:.6f} (cnt={cnt_c})")
 
-        (mse_m, rms_m, mse_p, rms_p, mse_c, rms_c) = mse_rms_error(
+        (mse_m, rms_m, std_rms_m,
+         mse_p, rms_p, std_rms_p,
+         mse_c, rms_c, std_rms_c) = mse_rms_error(
             params=[LMDA_best, num_rej_best], M0=M0_sig, X_all=Xfeat, s=args.s,
             xfeat_mode=args.xfeat, min_coverage=args.min_coverage, verbose=True,
             tau_start=tau_start, cv_mode=cv_mode, gap=gap,
@@ -1418,10 +1484,21 @@ def main():
             wt=wt,
             start_offset=args.start_offset,
             stride=12,
+            return_std=True,
         )
-        print(f"# [SIG RMS] model: MSE={mse_m:.6e}, RMS={rms_m:.6e}")
-        print(f"# [SIG RMS] pers : MSE={mse_p:.6e}, RMS={rms_p:.6e}")
-        print(f"# [SIG RMS] clim : MSE={mse_c:.6e}, RMS={rms_c:.6e}")
+        # ---- overwrite to "area-normalized RMS" as the official RMS ----
+        mse_m *= c_area**2
+        mse_p *= c_area**2
+        mse_c *= c_area**2
+        rms_m *= c_area
+        rms_p *= c_area
+        rms_c *= c_area
+        std_rms_m *= c_area
+        std_rms_p *= c_area
+        std_rms_c *= c_area
+        print(f"# [SPK RMS] model: MSE={mse_m:.6e}, RMS={rms_m:.6e}, RMS_std={std_rms_m:.6e}")
+        print(f"# [SPK RMS] pers : MSE={mse_p:.6e}, RMS={rms_p:.6e}, RMS_std={std_rms_p:.6e}")
+        print(f"# [SPK RMS] clim : MSE={mse_c:.6e}, RMS={rms_c:.6e}, RMS_std={std_rms_c:.6e}")
 
         (_, rms_x_maps) = loo_spatial_rms_maps(
             params=[LMDA_best, num_rej_best],

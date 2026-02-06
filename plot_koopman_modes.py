@@ -31,6 +31,197 @@ import cmocean
 # =========================================================
 # Utilities
 # =========================================================
+def _sigma_max_power(A, v0=None, iters=40, tol=1e-7):
+    """
+    Approximate spectral norm ||A||_2 (largest singular value) by power iteration
+    on A^*A. Works for real/complex dense matrices.
+
+    Returns
+    -------
+    sigma : float
+        Approximation of ||A||_2
+    v : ndarray (n,)
+        Approximate dominant right singular vector (warm-start usable)
+    """
+    n = A.shape[1]
+    if v0 is None:
+        v = np.random.default_rng(0).standard_normal(n) + 1j*np.random.default_rng(1).standard_normal(n)
+    else:
+        v = np.array(v0, dtype=A.dtype, copy=True)
+
+    # normalize
+    nv = np.linalg.norm(v)
+    if nv == 0:
+        v = np.ones(n, dtype=A.dtype)
+        nv = np.linalg.norm(v)
+    v /= nv
+
+    sigma_old = 0.0
+    for _ in range(int(iters)):
+        Av = A @ v
+        w = A.conj().T @ Av  # (A^*A)v
+        nw = np.linalg.norm(w)
+        if nw == 0:
+            return 0.0, v
+        v = w / nw
+
+        sigma = np.linalg.norm(A @ v)
+        if abs(sigma - sigma_old) <= tol * max(1.0, sigma):
+            break
+        sigma_old = sigma
+
+    return float(sigma), v
+
+
+def transient_growth_norm2(K, nmax=200, iters=40, tol=1e-7, return_powers=False):
+    """
+    Compute/approximate g(n)=||K^n||_2 for n=0..nmax with low cost.
+
+    Parameters
+    ----------
+    K : (n,n) array_like
+        Koopman matrix (real/complex).
+    nmax : int
+        Max power n.
+    iters, tol : power-iteration controls for ||A||_2 estimation.
+    return_powers : bool
+        If True, also return the list of K^n matrices (memory heavy).
+
+    Returns
+    -------
+    ns : ndarray (nmax+1,)
+    g  : ndarray (nmax+1,)
+        g[n] ≈ ||K^n||_2
+    gmax : float
+        max_n g[n]
+    n_star : int
+        argmax_n g[n]
+    (optional) powers : list of ndarray
+        powers[n] = K^n
+    """
+    K = np.asarray(K)
+    n = K.shape[0]
+    if K.shape[0] != K.shape[1]:
+        raise ValueError("K must be square.")
+
+    ns = np.arange(nmax + 1, dtype=int)
+    g = np.empty(nmax + 1, dtype=float)
+    g[0] = 1.0
+
+    A = np.eye(n, dtype=K.dtype)  # A = K^0
+    v = None  # warm start (dominant right singular vector)
+
+    powers = [A.copy()] if return_powers else None
+
+    for k in range(1, nmax + 1):
+        A = K @ A  # A = K^k
+        sigma, v = _sigma_max_power(A, v0=v, iters=iters, tol=tol)
+        g[k] = sigma
+        if return_powers:
+            powers.append(A.copy())
+
+    n_star = int(np.nanargmax(g))
+    gmax = float(g[n_star])
+
+    if return_powers:
+        return ns, g, gmax, n_star, powers
+    return ns, g, gmax, n_star
+
+
+def kreiss_constant_discrete(
+    K,
+    norm="2",
+    eps=1e-6,
+    r_max=2.0,
+    n_r=50,
+    n_theta=720,
+    refine_levels=1,
+    refine_factor=4,
+    return_argmax=False,
+):
+    r"""
+    Approximate discrete-time Kreiss constant:
+        kappa(K) = sup_{|z|>1} (|z|-1) ||(zI - K)^{-1}||.
+
+    If spectral radius > 1, returns inf.
+    norm: currently supports "2","fro","1","inf".
+    """
+    import scipy.linalg as la
+
+    K = np.asarray(K)
+    if K.ndim != 2 or K.shape[0] != K.shape[1]:
+        raise ValueError("K must be a square matrix.")
+
+    eigvals = np.linalg.eigvals(K)
+    if np.max(np.abs(eigvals)) > 1 + 1e-12:
+        return (np.inf, None) if return_argmax else np.inf
+
+    n = K.shape[0]
+    I = np.eye(n, dtype=complex)
+
+    def opnorm_inv(z):
+        M = (z * I - K)
+        X = la.solve(M, I, assume_a="gen", check_finite=False)
+        if norm == "2":
+            s = la.svdvals(X, check_finite=False)
+            return float(np.max(s))
+        elif norm == "fro":
+            return float(la.norm(X, ord="fro"))
+        elif norm == "1":
+            return float(la.norm(X, ord=1))
+        elif norm == "inf":
+            return float(la.norm(X, ord=np.inf))
+        else:
+            raise ValueError(f"Unknown norm: {norm}")
+
+    radii = np.geomspace(1.0 + eps, r_max, n_r)
+    thetas = np.linspace(0.0, 2.0 * np.pi, n_theta, endpoint=False)
+
+    best_val = -np.inf
+    best_z = None
+
+    def scan(radii_local, thetas_local):
+        nonlocal best_val, best_z
+        for r in radii_local:
+            zs = r * np.exp(1j * thetas_local)
+            for z in zs:
+                try:
+                    invn = opnorm_inv(z)
+                except Exception:
+                    continue
+                val = (abs(z) - 1.0) * invn
+                if val > best_val:
+                    best_val = float(val)
+                    best_z = z
+
+    # coarse
+    scan(radii, thetas)
+
+    # refine around best (optional)
+    for lvl in range(refine_levels):
+        if best_z is None or not np.isfinite(best_val):
+            break
+        r0 = abs(best_z)
+        th0 = np.angle(best_z)
+
+        r_lo = max(1.0 + eps, r0 / 1.5)
+        r_hi = min(r_max,      r0 * 1.5)
+
+        dth = (2.0 * np.pi) / n_theta
+        th_lo = th0 - 8 * dth
+        th_hi = th0 + 8 * dth
+
+        n_r_loc  = max(30, int(refine_factor * n_r / (2 ** (lvl + 1))))
+        n_th_loc = max(180, int(refine_factor * n_theta / (2 ** (lvl + 1))))
+
+        radii_loc  = np.geomspace(r_lo, r_hi, n_r_loc)
+        thetas_loc = np.linspace(th_lo, th_hi, n_th_loc, endpoint=False)
+        scan(radii_loc, thetas_loc)
+
+    if return_argmax:
+        return best_val, best_z
+    return best_val
+
 def save_gram_matrix(G, filename="G_sst.pdf",
                      title="Gram Matrix Heatmap",
                      label=r"$\hat{G}_{ij}$",
@@ -90,9 +281,9 @@ def residual2(K2, L, Tl):
     for j in range(L.shape[0]):
         res0 = Tl[:, j].T.conj() @ Tl[:, j]
         res1 = Tl[:, j].T.conj() @ K2 @ Tl[:, j]
-        res[j] = np.sqrt((res1.real / res0.real) - np.abs(L[j]) ** 2)
+        val = (res1.real / res0.real) - np.abs(L[j]) ** 2
+        res[j] = np.sqrt(max(0.0, float(val)))
     return res
-
 
 def sorted_pair_indices(res, eigvals, tol=1e-8):
     n = len(eigvals)
@@ -302,14 +493,16 @@ def koopman_modes(params, M0, X0, valid_indices,
                 Energy = np.sum(cos_w * np.abs(Xi_valid_phys) ** 2) / np.sum(cos_w)
 
                 title_real = (f"Re[#{i}+#{j}]: Energy {Energy:.2e}$\\mathrm{{K}}^2$"
-                              f"\\n efld {efold:.2f} per. {period:.2f}")
+                              f"\n efld {efold:.2f} per. {period:.2f}")
                 title_imag = (f"Im[#{i}-#{j}]: Energy {Energy:.2e}$\\mathrm{{K}}^2$"
-                              f"\\n efld {efold:.2f} per. {period:.2f}")
+                              f"\n efld {efold:.2f} per. {period:.2f}")
 
                 jt = eig_to_fld[i]
-                print("#Per.", i, period, efold, Energy, np.abs(eigvals[i]))
+#                print("#Per.", i, period, efold, Energy, np.abs(eigvals[i]))
                 plot_mode_timeseries(Phi_x[:, jt], eigvals_keep[jt], i, Energy, dt, smon)
-
+                res_g = float(res[i] + res[j])   # sorted_pair_indices と同じ定義（和）
+                print(f"#Per. {i:03d} per= {period:.2f} efld= {efold:.2f} "
+                      f"res= {res_g:.3f} E= {Energy:.3e} |lam|= {abs(eigvals[i]):.6f}")
             else:
                 i = group[0]
                 efold, period = efld_prd(eigvals[i])
@@ -323,12 +516,15 @@ def koopman_modes(params, M0, X0, valid_indices,
                 Energy = np.sum(cos_w * np.abs(Xi_valid_phys) ** 2) / np.sum(cos_w)
 
                 title_real = (f"Re[#{i}] {Energy:.2e}$\\mathrm{{K}}^2$"
-                              f"\\n efld {efold:.2f} per. {period:.2f}")
+                              f"\n efld {efold:.2f} per. {period:.2f}")
                 title_imag = (f"Im[#{i}] {Energy:.2e}$\\mathrm{{K}}^2$"
-                              f"\\n efld {efold:.2f} per. {period:.2f}")
+                              f"\n efld {efold:.2f} per. {period:.2f}")
 
                 jt = eig_to_fld[i]
-                print("#Per.", i, period, efold, Energy, np.abs(eigvals[i]))
+                res_g = float(res[i])
+#                print("#Per.", i, period, efold, Energy, np.abs(eigvals[i]))
+                print(f"#Per. {i:03d} per= {period:.2f} efld= {efold:.2f} "
+                      f"res= {res_g:.3f} E= {Energy:.3e} |lam|= {abs(eigvals[i]):.6f}")
                 plot_mode_timeseries(Phi_x[:, jt], eigvals_keep[jt], i, Energy, dt, smon)
 
             # --- draw maps (phys-space annual mean) ---
@@ -419,7 +615,8 @@ if __name__ == "__main__":
 
     # restore M0 as list of float64 2D arrays
     M0 = [np.asarray(M0_raw[i], dtype=np.float64) for i in range(len(M0_raw))]
-
+    print(len(M0), M0[0].shape)
+    
     print("# params", float(params[0]), int(round(params[1])))
     print("# FILE:", npz_path)
 
@@ -428,6 +625,30 @@ if __name__ == "__main__":
         dt=dt, smon=smon,
         plot=True, fname="koopman_eigvals.pdf"
     )
+
+    # -----------------------------
+    # Kreiss constant of Koopman matrix K
+    # -----------------------------
+    kappa, zstar = kreiss_constant_discrete(
+    K, norm="2",
+    eps=1e-6, r_max=1.15, n_r=20, n_theta=180,
+    refine_levels=0, return_argmax=True
+    )
+    print(f"# Kreiss kappa(K) ≈ {kappa:.6e}  (argmax z ≈ {zstar})")
+    # ---- 使用例（あなたのコードの末尾、K ができた後に追記）----
+    nmax = 10
+    ns, g, gmax, n_star = transient_growth_norm2(K, nmax=nmax, iters=50, tol=1e-8)
+    print(f"# transient growth: max ||K^n||_2 over n=0..{nmax} is {gmax:.6e} at n={n_star}")
+    
+    plt.figure(figsize=(6,4))
+    plt.plot(ns, g, marker="o", markersize=3)
+    plt.xlabel("n")
+    plt.ylabel(r"$\|K^n\|_2$")
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.savefig("transient_growth_norm2.pdf", dpi=300)
+    plt.close()
+
 
     # Gram matrices / diagnostics
     LMDA, num_rej = float(params[0]), float(params[1])

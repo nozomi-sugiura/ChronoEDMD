@@ -261,7 +261,7 @@ if __name__ == "__main__":
     Z0 = np.zeros((1, X12.shape[1], X12.shape[2]), dtype=X12.dtype)  # (1,d,ntr)
     Z  = np.concatenate([Z0, np.cumsum(X12, axis=0)], axis=0)        # (13,d,ntr)
 #    sigma_data = calc_sig_data(Z)
-    sigma_data = sigma_sig_numpy(Z,I=12)
+    sigma_data = sigma_sig_numpy(Z,I=13) #bugfix 20260203
     print("#sigma_data", sigma_data)
     np.save("sigma",sigma_data)
 

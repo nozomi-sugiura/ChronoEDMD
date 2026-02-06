@@ -2,33 +2,6 @@ import xarray as xr
 import numpy as np
 import sys
 
-infile = "ersst_v5_all.nc"
-ds = xr.open_dataset(infile)
-smon = int(sys.argv[1])  # start month (1..12), e.g. 5 means May-start
-
-# -------------------------
-# load SST and compress
-# -------------------------
-sst1 = ds["sst"].squeeze("lev")  # (time, lat, lon) assumed
-nt, ny, nx = sst1.shape
-
-sst = sst1.values  # (nt, ny, nx) numpy
-sst_2d = sst.reshape(nt, ny * nx)
-
-# mask: drop gridpoints that are NaN at ANY time (keep only fully-valid points)
-mask = np.any(np.isnan(sst), axis=0)          # (ny, nx)
-mask_flat = mask.reshape(ny * nx)
-valid_indices = np.where(~mask_flat)[0]       # 1D indices into ny*nx
-
-# compressed SST in degC
-sst_compressed = sst_2d[smon - 1 :, valid_indices]  # shape (T, d)
-T, d = sst_compressed.shape
-
-print("Compressed SST shape (raw):", sst_compressed.shape)
-
-# -------------------------
-# monthly climatology (past 30 years + current month, NO future)
-# -------------------------
 def monthly_climatology_past30_inclusive(X: np.ndarray, half_years: int = 30) -> np.ndarray:
     """
     X: (T, d) monthly series in degC (already cropped from start month)
@@ -44,70 +17,104 @@ def monthly_climatology_past30_inclusive(X: np.ndarray, half_years: int = 30) ->
         m = t % 12
         lo = max(0, t - half)
 
-        # pick indices in [lo, t] with same month m
-        # smallest index >= lo that matches month m:
+        # smallest index >= lo that matches month m
         first = lo + ((m - lo) % 12)
         idx = np.arange(first, t + 1, 12, dtype=int)
 
-        # safety (should not be empty)
         if idx.size == 0:
             clim[t] = X[t]
         else:
             clim[t] = X[idx].mean(axis=0)
     return clim
 
-clim_compressed = monthly_climatology_past30_inclusive(sst_compressed, half_years=30)
-anom_compressed = sst_compressed - clim_compressed
+def main():
+    if len(sys.argv) < 2:
+        print("Usage: python make_sst_anom.py <smon:1..12>")
+        sys.exit(1)
 
-# -------------------------
-# time array (aligned with sst_compressed)
-# -------------------------
-time_all = ds["time"].values                 # (nt,)  datetime64[...] のはず
-time_cropped = time_all[smon - 1 :]          # sst_compressed と同じクロップ
-assert time_cropped.shape[0] == T
+    infile = "ersst_v5_all.nc"
+    smon = int(sys.argv[1])  # start month (1..12)
+    if not (1 <= smon <= 12):
+        raise ValueError("smon must be in 1..12")
 
-# -------------------------
-# save outputs
-# -------------------------
-np.save("valid_indices.npy", valid_indices)
+    ds = xr.open_dataset(infile)
 
-# 保存する "sst_compressed.npy" を anomaly にする（ここが目的）
-np.save("sst_compressed.npy", anom_compressed)
+    # -------------------------
+    # load SST and compress
+    # -------------------------
+    sst1 = ds["sst"].squeeze("lev")  # (time, lat, lon)
+    nt, ny, nx = sst1.shape
 
-# 参考：climatology も保存（必要なら）
-np.save("clim_compressed.npy", clim_compressed)
+    sst = sst1.values  # (nt, ny, nx)
+    sst_2d = sst.reshape(nt, ny * nx)
 
-print("Saved anomaly SST shape:", anom_compressed.shape)
-print("Saved climatology shape:", clim_compressed.shape)
+    # mask: drop gridpoints that are NaN at ANY time
+    mask = np.any(np.isnan(sst), axis=0)     # (ny, nx)
+    valid_indices = np.where(~mask.reshape(ny * nx))[0]
 
-# -------------------------
-# build T2 path tensor from anomaly
-# -------------------------
-lag = 12
-dt = lag + 1
-margin = 0
+    # crop by start month, then compress
+    sst_compressed = sst_2d[smon - 1 :, valid_indices]  # (T, d)
+    T, d = sst_compressed.shape
+    print("Compressed SST shape (raw):", sst_compressed.shape)
 
-nt_new = anom_compressed.shape[0]
-nxy = anom_compressed.shape[1]
+    # -------------------------
+    # time array (aligned with sst_compressed)
+    # -------------------------
+    time_all = ds["time"].values          # (nt,) datetime64
+    time_cropped = time_all[smon - 1 :]   # (T,)
+    if time_cropped.shape[0] != T:
+        raise ValueError(f"time_cropped length {time_cropped.shape[0]} != T={T}")
 
-T2 = np.zeros((dt, nxy, nt_new // lag - margin), dtype=np.float64)
-#for j in range(nt_new // lag - margin):
-#    a = lag * j
-#    b = lag * j + dt
-#    print(j, a, b)
-#    T2[:, :, j] = anom_compressed[a:b, :]
-#
-#np.save("sst_path.npy", T2)
-#print("#dim", nt, nx, ny, nxy)
-time_path = np.empty((dt, nt_new // lag - margin), dtype=time_cropped.dtype)
+    # -------------------------
+    # monthly climatology (past 30 years + current month, NO future)
+    # -------------------------
+    clim_compressed = monthly_climatology_past30_inclusive(sst_compressed, half_years=30)
+    anom_compressed = sst_compressed - clim_compressed
 
-for j in range(nt_new // lag - margin):
-    a = lag * j
-    b = lag * j + dt
-#    print(j, a, b)
-    T2[:, :, j] = anom_compressed[a:b, :]
-    time_path[:, j] = time_cropped[a:b]      # ★同じ a:b を使う
+    # -------------------------
+    # save outputs
+    # -------------------------
+    np.save("valid_indices.npy", valid_indices)
+    np.save("sst_compressed.npy", anom_compressed)    # anomaly saved here
+    np.save("clim_compressed.npy", clim_compressed)
 
-np.save("sst_path.npy", T2)
-np.save("sst_time_path.npy", time_path)      # ★追加
-print("Saved time_path shape:", time_path.shape)
+    print("Saved anomaly SST shape:", anom_compressed.shape)
+    print("Saved climatology shape:", clim_compressed.shape)
+
+    # -------------------------
+    # build T2 path tensor from anomaly (+ aligned time_path)
+    # -------------------------
+    lag = 12
+    dt = lag + 1
+    margin = 0
+
+    nt_new = anom_compressed.shape[0]
+    nxy = anom_compressed.shape[1]
+
+    # ★重要: dt 点が必ず取れる窓だけを作る
+    ntr = (nt_new - dt) // lag + 1 - margin
+    if ntr <= 0:
+        raise ValueError(f"Not enough data: nt_new={nt_new}, dt={dt}, lag={lag}, margin={margin}")
+
+    T2 = np.zeros((dt, nxy, ntr), dtype=np.float64)
+    time_path = np.empty((dt, ntr), dtype=time_cropped.dtype)
+
+    for j in range(ntr):
+        a = lag * j
+        b = a + dt  # ★常に b <= nt_new になるよう ntr を定義した
+
+        # デバッグしたいときだけ有効化
+        # print("j,a,b =", j, a, b, "slice shape =", anom_compressed[a:b, :].shape)
+
+        T2[:, :, j] = anom_compressed[a:b, :]
+        time_path[:, j] = time_cropped[a:b]
+
+    np.save("sst_path.npy", T2)
+    np.save("sst_time_path.npy", time_path)
+
+    print("Saved sst_path shape:", T2.shape)          # (13, d, ntr)
+    print("Saved time_path shape:", time_path.shape)  # (13, ntr)
+    print("#dim", nt, nx, ny, nxy)
+
+if __name__ == "__main__":
+    main()

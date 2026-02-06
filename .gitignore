@@ -1,0 +1,15 @@
+# data / large artifacts
+ersst_v5_all.nc
+ersst.v5.*.nc
+ChronoEDMD.tar
+ChronoEDMD.tar.gz
+
+# run outputs
+lfo_*/
+lso_*/
+*.log
+failed_yyyymm.txt
+
+# editor backups
+*~
+\#*#
