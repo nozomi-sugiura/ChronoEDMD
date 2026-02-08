@@ -1,16 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-export OMP_NUM_THREADS=1
-export OPENBLAS_NUM_THREADS=1
-export MKL_NUM_THREADS=1
-export VECLIB_MAXIMUM_THREADS=1
-export NUMEXPR_NUM_THREADS=1
 # ---------------------------------------------
-# run_lfo_all_s.sh
+# run_lfo_all_s.sh 
 #
 # Run LFO for a fixed start-month (smon) and sweep lead time s=1..12.
-# If the target directory already exists, skip that (s) to avoid overwrite.
+# ALWAYS (re)run and overwrite exec.log in each directory.
 #
 # usage:
 #   bash ./run_lfo_all_s.sh <smon:1..12> [jobs]
@@ -35,48 +30,46 @@ if ! [[ "$jobs" =~ ^[0-9]+$ ]] || (( jobs < 1 )); then
   exit 1
 fi
 
-# Avoid CPU oversubscription from BLAS/OpenMP
+# Avoid CPU oversubscription from BLAS/OpenMP (important on macOS)
 export OMP_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1
 export MKL_NUM_THREADS=1
 export VECLIB_MAXIMUM_THREADS=1
 export NUMEXPR_NUM_THREADS=1
 
-if ! command -v parallel >/dev/null 2>&1; then
+command -v parallel >/dev/null 2>&1 || {
   echo "ERROR: GNU parallel is required (brew install parallel)." >&2
   exit 1
-fi
-if [[ ! -x ./exec.sh ]]; then
+}
+[[ -x ./exec.sh ]] || {
   echo "ERROR: ./exec.sh not found or not executable. Run: chmod +x exec.sh" >&2
   exit 1
-fi
+}
+
+# cd to script dir (avoid relative-path accidents)
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$script_dir"
 
 m2="$(printf "%02d" "$m")"
-echo "LFO lead-time sweep for smon=$m (dir tag=$m2), jobs=$jobs"
-echo "Skip existing directories."
+echo "LFO lead-time sweep : smon=$m (tag=$m2), jobs=$jobs"
 echo
 
-seq 1 12 | parallel -j "$jobs" --line-buffer '
+seq 1 12 | parallel -j "$jobs" --halt now,fail=1 --line-buffer "
   s={}
-  s2=$(printf "%02d" "$s")
-  dir="lfo_'$m2'_s${s2}"
+  s2=\$(printf '%02d' \"\$s\")
+  dir='lfo_${m2}_s'\${s2}
 
-  if [[ -d "$dir" ]]; then
-    echo "# SKIP ${dir} (already exists)"
-    exit 0
-  fi
-
-  mkdir -p "$dir"
+  mkdir -p \"\$dir\"
   (
     set -euo pipefail
-    cd "$dir"
-    echo "# START smon='$m' cv_mode=lfo s=$s $(date -Iseconds)"
-    ../exec.sh "'$m'" lfo "$s"
-    echo "# END   smon='$m' cv_mode=lfo s=$s $(date -Iseconds)"
+    cd \"\$dir\"
+    echo \"# START smon=${m} cv_mode=lfo s=\$s \$(date -Iseconds)\"
+    ../exec.sh \"${m}\" lfo \"\$s\"
+    echo \"# END   smon=${m} cv_mode=lfo s=\$s \$(date -Iseconds)\"
   ) > exec.log 2>&1
 
-  echo "# DONE ${dir} (log: ${dir}/exec.log)"
-'
+  echo \"# DONE \${dir} (log: \${dir}/exec.log)\"
+"
 
 echo
 echo "Done."

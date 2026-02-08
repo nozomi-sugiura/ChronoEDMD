@@ -39,6 +39,13 @@ Download / build:
   build_ersst_v5_all.py
     Merge monthly files (ersst.v5.YYYYMM.nc) into ersst_v5_all.nc.
 
+  build_ersst_v5_all.sh
+    Wrapper script:
+      - run build_ersst_v5_all.py
+      - confirm ersst_v5_all.nc exists and is non-empty (test -s)
+      - delete the original monthly files (ersst.v5.YYYYMM.nc) to save disk space
+    Monthly files are deleted only if the merged file is successfully created.
+
 Main pipeline:
   run_all.sh
     Batch run for cv_mode in (lfo|lso), fixed lead time s, for start months 1..12.
@@ -70,8 +77,20 @@ Workflow
 Step 1. Download ERSST v5 (example: match the paper period)
   ./download_ersst_v5_monthly.sh . 185401 202503
 
-Step 2. Build ersst_v5_all.nc
-  python -u build_ersst_v5_all.py
+Step 2. Build ersst_v5_all.nc (and optionally remove monthly files)
+  # If build_ersst_v5_all.sh is not executable:
+  chmod +x build_ersst_v5_all.sh
+
+  # Build, then delete monthly files only if the merged file exists and is non-empty:
+  ./build_ersst_v5_all.sh
+
+  Notes:
+  - build_ersst_v5_all.sh is typically:
+      python3 build_ersst_v5_all.py \
+        && test -s ersst_v5_all.nc \
+        && rm -f ersst.v5.??????.nc
+  - If you prefer a safer first run, replace the final "rm" with:
+      mv ersst.v5.??????.nc ~/.Trash/
 
 Step 3. Run batch experiments (example: LFO, s=5, jobs=2 default)
   ./run_all.sh lfo 5
