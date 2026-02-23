@@ -315,7 +315,7 @@ def spk_month_weights(kind="cumsum"):
         raise ValueError(f"Unknown spk_weight kind: {kind}")
     return w
 
-def seasonal_progress_gram_from_windows(X0, sigma, month_w=None, normalize_diag=False):
+def sum_of_pairs_gram_from_windows(X0, sigma, month_w=None, normalize_diag=False):
     n, d, ntr = X0.shape
     assert n == 13
     if month_w is None:
@@ -1277,7 +1277,7 @@ def main():
         print("# sigma (SPK definition) =", sigma_spk)
 
         month_w = spk_month_weights(args.spk_weight)
-        H_spk = seasonal_progress_gram_from_windows(
+        H_spk = sum_of_pairs_gram_from_windows(
             X0w, sigma=sigma_spk, month_w=month_w, normalize_diag=args.normalize_spk
         )
         M0_spk = [H_spk]

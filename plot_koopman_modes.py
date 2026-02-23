@@ -312,80 +312,123 @@ def sorted_pair_indices(res, eigvals, tol=1e-8):
 
 
 def plot_mode_timeseries(Phi_x1, L1, jt, E, dt, smon,
-                         deamp=True, theta=None,
-                         csv_raw=True, csv_path=None):
+                         plot_kind="raw",   # "raw" or "proc"
+                         theta=None,
+                         csv_save=True, csv_path=None,
+                         year_shift_plot=0.5):  # 表示用のシフト（年平均窓の中心なら +0.5）
     """
     Phi_x1 : complex eigenfunction values a_j(t) (length n)
-    L1     : eigenvalue
+    L1     : eigenvalue (discrete-time, step dt)
     dt     : sampling interval [yr]
-    smon   : start month for time axis offset
+    smon   : start month of first record (1..12)
 
-    CSV saves raw a(t) (before deamp/rotation).
+    - raw  : a_raw = Phi_x1
+    - proc : a_proc = deamp(a_raw) and then optional rotation by theta
     """
+    import os
+    import numpy as np
     import pandas as pd
+    import matplotlib.pyplot as plt
 
     n = Phi_x1.shape[0]
     t = np.arange(n, dtype=float) * dt
-    years = (1854 + (smon - 1) / 12.0) + t
 
-    if csv_raw:
+    # ---- time axis (definition): month-start convention ----
+    years = 1854.0 + (smon - 1.0) / 12.0 + t  # 月初（定義用）
+    years_plot = years + float(year_shift_plot)  # 表示用（年窓の中央へ寄せる等）
+
+    # ---- eigenvalue to continuous-time rate ----
+    lam = (np.log(L1) / dt)   # sigma + i omega
+    sigma = float(lam.real)
+    omega = float(lam.imag)
+
+    # ---- raw coefficient ----
+    a_raw = Phi_x1.astype(complex)
+
+    # ---- processed coefficient (deamp + optional rotation) ----
+    a_proc = a_raw.copy()
+    if np.isfinite(sigma) and abs(sigma) > 0:
+        t_ref = t.mean()
+        a_proc = a_proc * np.exp(-sigma * (t - t_ref))  # deamp
+    if theta is not None:
+        a_proc = a_proc * np.exp(-1j * float(theta))    # rotate
+
+    # ---- choose what to plot ----
+    if plot_kind == "raw":
+        a_plot = a_raw
+        tag = " (raw)"
+    elif plot_kind == "proc":
+        a_plot = a_proc
+        tag = " (proc)"
+        if theta is not None:
+            tag += " (rot)"
+        tag += " (deamp)"
+    else:
+        raise ValueError("plot_kind must be 'raw' or 'proc'.")
+
+    real_part = a_plot.real
+    imag_part = a_plot.imag
+
+    # ---- period text ----
+    if omega != 0.0:
+        period = abs(2 * np.pi / omega)
+        efold = (1.0 / sigma) if sigma != 0.0 else np.inf
+        period_text = f" e-folding: {efold:.2f} yr, Period: {period:.2f} yr"
+    else:
+        efold = (1.0 / sigma) if sigma != 0.0 else np.inf
+        period_text = f" e-folding: {efold:.2f} yr, Period: ∞ yr"
+
+    # ---- CSV: save BOTH raw and proc (always unambiguous) ----
+    if csv_save:
         os.makedirs("frames", exist_ok=True)
         if csv_path is None:
             csv_path = f"frames/timeseries_{jt:03d}.csv"
-        amp = np.abs(Phi_x1)
-        phase = np.angle(Phi_x1)
-        phase_unw = np.unwrap(phase)
+
+        def pack(a):
+            amp = np.abs(a)
+            ph = np.angle(a)
+            return amp, ph, np.unwrap(ph)
+
+        amp_raw, ph_raw, phu_raw = pack(a_raw)
+        amp_prc, ph_prc, phu_prc = pack(a_proc)
+
         df = pd.DataFrame({
-            "year": years,
-            "real": Phi_x1.real,
-            "imag": Phi_x1.imag,
-            "amplitude": amp,
-            "phase_rad": phase,
-            "phase_unwrapped_rad": phase_unw
+            "year": years,               # 定義用（窓の開始）
+            "year_plot": years_plot,     # 表示用（窓の中心など）
+
+            "real_raw": a_raw.real,
+            "imag_raw": a_raw.imag,
+            "amplitude_raw": amp_raw,
+            "phase_rad_raw": ph_raw,
+            "phase_unwrapped_rad_raw": phu_raw,
+
+            "real_proc": a_proc.real,
+            "imag_proc": a_proc.imag,
+            "amplitude_proc": amp_prc,
+            "phase_rad_proc": ph_prc,
+            "phase_unwrapped_rad_proc": phu_prc,
+
+            "sigma": np.full(n, sigma),
+            "omega": np.full(n, omega),
+            "theta_rad": np.full(n, float(theta) if theta is not None else np.nan),
         })
         df.to_csv(csv_path, index=False, float_format="%.6f")
 
-    lam = (np.log(L1) / dt)   # sigma + i omega
-    sigma = lam.real
-    omega = lam.imag
-
-    a = Phi_x1.astype(complex)
-
-    if deamp and np.isfinite(sigma) and abs(sigma) > 0:
-        t_ref = t.mean()
-        a = a * np.exp(-sigma * (t - t_ref))
-
-    if theta is not None:
-        a = a * np.exp(-1j * theta)
-
-    real_part = a.real
-    imag_part = a.imag
-
-    if omega != 0:
-        efold = 1.0 / sigma if sigma != 0 else np.inf
-        period = abs(2 * np.pi / omega)
-        period_text = f" e-folding: {efold:.2f} yr, Period: {period:.2f} yr"
-    else:
-        efold = 1.0 / sigma if sigma != 0 else np.inf
-        period_text = f" e-folding: {efold:.2f} yr, Period: ∞ yr"
-
+    # ---- plot ----
     plt.figure(figsize=(10, 4))
-    plt.plot(years, real_part, label="Real Part", color="red")
-    plt.plot(years, imag_part, label="Imag Part", color="purple", linestyle="--")
+    plt.plot(years_plot, real_part, label="Real", color="red")
+    plt.plot(years_plot, imag_part, label="Imag", color="purple", linestyle="--")
     plt.xlabel("Year")
-    plt.ylabel("Eigenfunction Value")
-    tag = " (deamped)" if deamp else ""
-    if theta is not None:
-        tag += " (rot)"
+    plt.ylabel("Eigenfunction value")
     plt.title(f"Time Series of Mode {jt}{tag}{period_text} Energy {E:.2e}", fontsize=8)
     plt.legend()
     plt.grid(True)
-    plt.xlim(years[0], years[-1])
-    plt.ylim(-1.1, 1.1)
+    plt.xlim(years_plot[0], years_plot[-1])
+    plt.ylim(-1.5, 1.5)
     os.makedirs("frames", exist_ok=True)
     plt.savefig(f"frames/timeseries_{jt:03d}.pdf", dpi=300, bbox_inches="tight")
     plt.close()
-
+    
 
 # =========================================================
 # Core

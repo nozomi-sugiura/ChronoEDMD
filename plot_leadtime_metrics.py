@@ -11,8 +11,10 @@ leads = np.arange(1, 13, dtype=int)
 #LOG_GLOB = "lfo_08_s=*/loo*log"
 ASSUME_RMS_1ST_SPK_2ND_SIG = True
 
-OUT_KPC = "leadtime_kPC.pdf"
-OUT_RMS = "leadtime_RMS.pdf"
+OUT_KPC = "leadtime_kPC.png"
+OUT_RMS = "leadtime_RMS.png"
+OUT_KPC2 = "leadtime_kPC.pdf"
+OUT_RMS2 = "leadtime_RMS.pdf"
 
 #re_lead = re.compile(r"lfo_08_s=(\d+)/")
 
@@ -125,12 +127,13 @@ if not np.all(np.isnan(y)):
 
 plt.xticks(leads)                 # leads = [1,2,3,4,5] を想定
 plt.xlim(leads.min()-0.1, leads.max()+0.1)  # 任意（端を少し余白）    
-plt.xlabel("Lead time s (years)")
+plt.xlabel("Lead time (years)")
 plt.ylabel("mean kPC")
 plt.grid(True, alpha=0.3)
 plt.legend()
 plt.tight_layout()
 plt.savefig(OUT_KPC, dpi=300)
+plt.savefig(OUT_KPC2)
 plt.close()
 
 # -------- RMS --------
@@ -153,12 +156,13 @@ if not np.all(np.isnan(y)):
 
 plt.xticks(leads)                 # leads = [1,2,3,4,5] を想定
 plt.xlim(leads.min()-0.1, leads.max()+0.1)  # 任意（端を少し余白）
-plt.xlabel("Lead time s (years)")
-plt.ylabel("RMS")
+plt.xlabel("Lead time (years)")
+plt.ylabel("RMSE")
 plt.grid(True, alpha=0.3)
 plt.legend()
 plt.tight_layout()
 plt.savefig(OUT_RMS, dpi=300)
+plt.savefig(OUT_RMS2)
 plt.close()
 
 print(f"Saved: {OUT_KPC}")
