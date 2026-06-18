@@ -1,23 +1,22 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Run the three L96 cases used in the paper.
+#
+# Cases:
+#   A: F=10, h=0.50
+#   B: F=10, h=0.75
+#   C: F=10, h=1.00
+#
 # Usage:
-#   bash run_seeds_F_default_0_9_with_snapshot.sh F_VALUE
-#   bash run_seeds_F_default_0_9_with_snapshot.sh F_VALUE SEED1 [SEED2 ...]
+#   bash run_seeds_ABC_F10_h_cases.sh
+#   bash run_seeds_ABC_F10_h_cases.sh SEED1 [SEED2 ...]
 #
 # Examples:
-#   bash run_seeds_F_default_0_9_with_snapshot.sh 8.0
-#   bash run_seeds_F_default_0_9_with_snapshot.sh 10.0 0 1 2 3
+#   bash run_seeds_ABC_F10_h_cases.sh
+#   bash run_seeds_ABC_F10_h_cases.sh 0 1 2 3
 
-if [[ $# -lt 1 ]]; then
-  echo "Usage: bash $0 F_VALUE [SEED1 SEED2 ...]" >&2
-  echo "Example: bash $0 8.0" >&2
-  echo "Example: bash $0 8.0 0 1 2 3" >&2
-  exit 1
-fi
-
-F_VALUE="$1"
-shift
+F_VALUE="10.0"
 
 # Default seed ensemble: 0,1,...,9
 if [[ $# -eq 0 ]]; then
@@ -25,6 +24,9 @@ if [[ $# -eq 0 ]]; then
 else
   SEEDS=("$@")
 fi
+
+# Case labels and h values must match the paper.
+CASES=("A:0.50" "B:0.75" "C:1.00")
 
 ROOT_DIR="$(pwd)"
 
@@ -39,43 +41,56 @@ for script in "$MODEL_SCRIPT" "$SIG_SCRIPT" "$SNAPSHOT_SCRIPT"; do
   fi
 done
 
-F_TAG=$(printf "%s" "$F_VALUE" | sed 's/-/m/g; s/\./p/g')
+tag_value() {
+  printf "%s" "$1" | sed 's/-/m/g; s/\./p/g'
+}
+
+F_TAG=$(tag_value "$F_VALUE")
 
 echo "F_VALUE = $F_VALUE"
+echo "CASES   = ${CASES[*]}"
 echo "SEEDS   = ${SEEDS[*]}"
 echo ""
 
-for seed in "${SEEDS[@]}"; do
-  seed_pad=$(printf "%03d" "$seed")
-  workdir="F${F_TAG}_S${seed_pad}"
+for case_item in "${CASES[@]}"; do
+  CASE_LABEL="${case_item%%:*}"
+  H_VALUE="${case_item#*:}"
+  H_TAG=$(tag_value "$H_VALUE")
 
-  echo "============================================================"
-  echo "F       = $F_VALUE"
-  echo "SEED    = $seed"
-  echo "WORKDIR = $workdir"
-  echo "============================================================"
+  for seed in "${SEEDS[@]}"; do
+    seed_pad=$(printf "%03d" "$seed")
+    workdir="case${CASE_LABEL}_F${F_TAG}_h${H_TAG}_S${seed_pad}"
 
-  mkdir -p "$workdir"
+    echo "============================================================"
+    echo "CASE    = $CASE_LABEL"
+    echo "F       = $F_VALUE"
+    echo "h       = $H_VALUE"
+    echo "SEED    = $seed"
+    echo "WORKDIR = $workdir"
+    echo "============================================================"
 
-  (
-    cd "$workdir"
-    mkdir -p data
+    mkdir -p "$workdir"
 
-    echo "[1/3] Running model_l96_2scale_argF.py with F=$F_VALUE, SEED=$seed"
-    python -u "$MODEL_SCRIPT" "$seed" --F "$F_VALUE" --data-file "data/l96.npz" \
-      2>&1 | tee "model_l96_2scale_F${F_TAG}_seed${seed_pad}.log"
+    (
+      cd "$workdir"
+      mkdir -p data
 
-    echo "[2/3] Running calc_sig_vs_kiraly_spk_l96_with_stats.py"
-    python -u "$SIG_SCRIPT" \
-      2>&1 | tee "calc_sig_vs_kiraly_spk_l96_F${F_TAG}_seed${seed_pad}.log"
+      echo "[1/3] Running model_l96_2scale_argF.py with F=$F_VALUE, h=$H_VALUE, SEED=$seed"
+      python -u "$MODEL_SCRIPT" "$seed" --F "$F_VALUE" --h "$H_VALUE" --data-file "data/l96.npz" \
+        2>&1 | tee "model_l96_2scale_case${CASE_LABEL}_F${F_TAG}_h${H_TAG}_seed${seed_pad}.log"
 
-    echo "[3/3] Running calc_snapshot_edmd_l96_with_stats.py"
-    python -u "$SNAPSHOT_SCRIPT" \
-      2>&1 | tee "calc_snapshot_edmd_l96_F${F_TAG}_seed${seed_pad}.log"
-  )
+      echo "[2/3] Running calc_sig_vs_kiraly_spk_l96_with_stats.py"
+      python -u "$SIG_SCRIPT" \
+        2>&1 | tee "calc_sig_vs_kiraly_spk_l96_case${CASE_LABEL}_F${F_TAG}_h${H_TAG}_seed${seed_pad}.log"
 
-  echo "Finished F=$F_VALUE, seed=$seed. Results are in $workdir/"
-  echo ""
+      echo "[3/3] Running calc_snapshot_edmd_l96_with_stats.py"
+      python -u "$SNAPSHOT_SCRIPT" \
+        2>&1 | tee "calc_snapshot_edmd_l96_case${CASE_LABEL}_F${F_TAG}_h${H_TAG}_seed${seed_pad}.log"
+    )
+
+    echo "Finished case=$CASE_LABEL, F=$F_VALUE, h=$H_VALUE, seed=$seed. Results are in $workdir/"
+    echo ""
+  done
 done
 
-echo "All seeds finished for F=$F_VALUE."
+echo "All cases and seeds finished."

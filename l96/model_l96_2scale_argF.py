@@ -215,6 +215,12 @@ def parse_args():
         help="Constant forcing parameter F. Default: 10.0.",
     )
     parser.add_argument(
+        "--h",
+        type=float,
+        default=1.0,
+        help="Two-scale coupling parameter h. Default: 1.0.",
+    )
+    parser.add_argument(
         "--data-file",
         type=str,
         default="data/l96.npz",
@@ -230,7 +236,7 @@ L_SEG = 12
 
 J = 8
 F = args.F
-h = 0.5 # regime_A
+h = args.h
 c = 10.0
 b = 10.0
 DT = 0.01
